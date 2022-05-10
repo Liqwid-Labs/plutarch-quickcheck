@@ -42,17 +42,13 @@ common common-lang
     BinaryLiterals
     ConstraintKinds
     DataKinds
-    DeriveFunctor
-    DeriveGeneric
     DeriveTraversable
-    DerivingStrategies
     DerivingVia
     EmptyCase
     FlexibleContexts
     FlexibleInstances
     GeneralisedNewtypeDeriving
     HexFloatLiterals
-    ImportQualifiedPost
     InstanceSigs
     KindSignatures
     LambdaCase

@@ -59,6 +59,7 @@ jobs:
       - name: Check formatting
         run: ./.github/format.sh ${{ runner.temp }}/fourmolu
   check-build:
+    name: "Nix build"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout base repo
@@ -73,13 +74,15 @@ jobs:
             experimental-features = nix-command flakes
 
       - name: Add cabal folder to cache
-        id: cabal
         uses: actions/cache@v2.1.4
+        env:
+          V: 0
         with:
           path: |
             ~/.cabal/packages
             ~/.cabal/store
             dist-newstyle
-          key: ${{ runner.os }}-cabal
+          key: ${{ env.V }}-${{ hashFiles('./flake.lock') }}
+          restore-keys: ${{ env.V }}-
       - name: Build the project
         run: nix build .#check.x86_64-linux        

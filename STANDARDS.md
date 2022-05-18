@@ -127,7 +127,10 @@ automatically.
 
 Every source file MUST be free of warnings as produced by
 [HLint](http://hackage.haskell.org/package/hlint). The CI for any project MUST
-enforce this.
+enforce this. 
+
+HLint warnings MUST be disabled by annotation use on a per-module basis when
+enforcing the recommendation would cause the code to no longer compile.
 
 #### Justification
 
@@ -136,6 +139,15 @@ inefficiency. It also describes many useful refactors, which in many cases
 make the code easier to read and understand. As this is fully automatic, it 
 saves effort on our part, and ensures consistency across the codebase without 
 us having to think about it.
+
+There are, however, some cases where HLint isn't as aware of GHC features and
+their interactions as we would like. One common example is that sometimes, full
+eta-expansion is required for GHC's type checker to accept some code, but HLint
+will argue for a reduction instead. In this case, disabling HLint warnings using
+annotations is the right choice, but this would usually only be in a narrow
+scope, and hence doesn't justify configuration changes project-wide. This also
+acts as a good signpost, as this behaviour can be unexpected for Haskell
+developers as well. 
 
 ### Code formatting
 

@@ -216,7 +216,7 @@ classifiedProperty getGen shr getOutcome classify comp = case cardinality @ix of
                     let s = compile (precompiled # pconstant input)
                         (res, _, logs) = evalScript s
                      in counterexample (prettyLogs logs)
-                            . ensureCovered input classify
+                            . ensureCovered classified
                             $ case res of
                                 Right s' ->
                                     if
@@ -288,7 +288,7 @@ classifiedPropertyNative getGen shr getOutcome classify comp = case cardinality 
                 let s = compile (precompiled # (pconstant input) # toPMaybe (getOutcome input))
                     (res, _, logs) = evalScript s
                  in counterexample (prettyLogs logs)
-                        . ensureCovered input classify
+                        . ensureCovered classified
                         $ case res of
                             Right s' ->
                                 if
@@ -459,17 +459,16 @@ showInput :: forall (a :: Type). (Show a) => a -> String
 showInput x = renderStyle ourStyle $ hang "Generated input" 4 (ppDoc x)
 
 ensureCovered ::
-    forall (ix :: Type) (a :: Type).
+    forall (ix :: Type).
     (Finite ix, Eq ix, Show ix) =>
-    a ->
-    (a -> ix) ->
+    ix ->
     Property ->
     Property
-ensureCovered example classify =
+ensureCovered inputClass =
     fmap checkCoverage . appEndo . foldMap (Endo . go) $ universeF
   where
     go :: ix -> Property -> Property
-    go ix = cover probability (classify example == ix) (ppShow ix)
+    go ix = cover probability (inputClass == ix) (ppShow ix)
     probability :: Double
     probability =
         let Tagged k = cardinality @ix

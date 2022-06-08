@@ -193,7 +193,7 @@ classifiedProperty ::
 classifiedProperty getGen shr getOutcome classify comp = case cardinality @ix of
     Tagged 0 -> failOutNoCases
     Tagged 1 -> failOutOneCase
-    _ -> forAllShrinkShow gen shr' (showInput . snd) (go (classifiedTemplate comp getOutcome))
+    _ -> forAllShrinkShow gen shr' (showInput . snd) (go (ppropertyTemplate comp getOutcome))
   where
     gen :: Gen (ix, a)
     gen = do
@@ -208,27 +208,31 @@ classifiedProperty getGen shr getOutcome classify comp = case cardinality @ix of
         (forall (s' :: S). Term s' (c :--> PInteger)) ->
         (ix, a) ->
         Property
-    go precompiled (ix, input) =
-        let classified = classify input
-         in if ix /= classified
-                then failedClassification ix classified
+    go pproperty (inputClass, input) =
+        let actualClass = classify input
+         in if inputClass /= actualClass
+                then failedClassification inputClass actualClass
                 else
-                    let s = compile (precompiled # pconstant input)
+                    let s = compile (pproperty # pconstant input)
                         (res, _, logs) = evalScript s
                      in counterexample (prettyLogs logs)
-                            . ensureCovered classified
-                            $ case res of
-                                Right s' ->
-                                    if
-                                            | s' == canon 2 -> counterexample ranOnCrash . property $ False
-                                            | s' == canon 0 -> property True
-                                            | otherwise -> counterexample wrongResult . property $ False
-                                Left e ->
-                                    let sTest = compile (pisNothing #$ getOutcome # pconstant input)
-                                        (testRes, _, _) = evalScript sTest
-                                     in case testRes of
-                                            Left e' -> failCrashyGetOutcome e'
-                                            Right s' -> crashedWhenItShouldHave e s'
+                            . ensureCovered inputClass
+                            $ handleScriptResult res input
+    handleScriptResult :: Either EvalError Script -> a -> Property
+    handleScriptResult res input =
+        case res of
+            Right retCode ->
+                if
+                    | retCode == canon 2 -> counterexample ranOnCrash . property $ False
+                    | retCode == canon 0 -> property True
+                    | otherwise -> counterexample wrongResult . property $ False
+            Left e ->
+                let sTest = compile (pisNothing #$ getOutcome # pconstant input)
+                    (testRes, _, _) = evalScript sTest
+                    in case testRes of
+                        Left e' -> failCrashyGetOutcome e'
+                        Right isCrashExpected ->
+                            handleCrashForExpectation e isCrashExpected
 
 {- | Identical to @classifiedProperty@ but it receives expected result
    in Haskell function instead of Plutarch function. As a result it
@@ -255,8 +259,8 @@ classifiedPropertyNative ::
     (ix -> Gen a) ->
     -- | A shrinker for inputs.
     (a -> [a]) ->
-    -- | Given an input value, either construct its
-    -- corresponding expected value or fail.
+    -- | Given an input value, constructs its corresponding expected result.
+    -- Returns 'Nothing' to signal expected failure.
     (a -> Maybe e) ->
     -- | A \'classifier function\' for generated inputs.
     (a -> ix) ->
@@ -266,7 +270,7 @@ classifiedPropertyNative ::
 classifiedPropertyNative getGen shr getOutcome classify comp = case cardinality @ix of
     Tagged 0 -> failOutNoCases
     Tagged 1 -> failOutOneCase
-    _ -> forAllShrinkShow gen shr' (showInput . snd) (go (classifiedTemplateNativeEx comp))
+    _ -> forAllShrinkShow gen shr' (showInput . snd) (go (ppropertyTemplateNativeEx comp))
   where
     gen :: Gen (ix, a)
     gen = do
@@ -278,31 +282,33 @@ classifiedPropertyNative getGen shr getOutcome classify comp = case cardinality 
         guard (classify x' == ix)
         pure (ix, x')
     go ::
-        (forall (s' :: S). Term s' (c :--> (PMaybe d) :--> PInteger)) ->
+        (forall (s' :: S). Term s' (c :--> PMaybe d :--> PInteger)) ->
         (ix, a) ->
         Property
-    go precompiled (ix, input) =
-        if ix /= classified
-            then failedClassification ix classified
-            else
-                let s = compile (precompiled # (pconstant input) # toPMaybe (getOutcome input))
-                    (res, _, logs) = evalScript s
-                 in counterexample (prettyLogs logs)
-                        . ensureCovered classified
-                        $ case res of
-                            Right s' ->
-                                if
-                                        | s' == canon 2 -> counterexample ranOnCrash . property $ False
-                                        | s' == canon 0 -> property True
-                                        | otherwise -> counterexample wrongResult . property $ False
-                            Left e ->
-                                let sTest = compile (pisNothing #$ toPMaybe (getOutcome input))
-                                    (testRes, _, _) = evalScript sTest
-                                 in case testRes of
-                                        Left e' -> failCrashyGetOutcome e'
-                                        Right s' -> crashedWhenItShouldHave e s'
-      where
-        classified = classify input
+    go pproperty (inputClass, input) =
+        let actualClass = classify input
+         in if inputClass /= actualClass
+                then failedClassification inputClass actualClass
+                else
+                    let s = compile (pproperty # pconstant input # toPMaybe (getOutcome input))
+                        (res, _, logs) = evalScript s
+                    in counterexample (prettyLogs logs)
+                            . ensureCovered inputClass
+                            $ handleScriptResult res input
+    handleScriptResult :: Either EvalError Script -> a -> Property
+    handleScriptResult res input =
+        case res of
+            Right retCode ->
+                if
+                    | retCode == canon 2 -> counterexample ranOnCrash . property $ False
+                    | retCode == canon 0 -> property True
+                    | otherwise -> counterexample wrongResult . property $ False
+            Left e ->
+                let sIsCrashExpected = compile (pisNothing #$ toPMaybe (getOutcome input))
+                    (testRes, _, _) = evalScript sIsCrashExpected
+                    in case testRes of
+                        Left e' -> failCrashyGetOutcome e'
+                        Right isCrashExpected -> handleCrashForExpectation e isCrashExpected
 
 -- Note from Koz
 --
@@ -323,6 +329,8 @@ peqTemplate comp = phoistAcyclic $
     plam $ \expected input ->
         expected #== comp # input
 
+-- | The resulting Plutarch function tests the given computation.
+--
 -- Note from Seungheon!
 -- Here, Template is using old fashion C-style
 -- error handler--it uses integer for different types
@@ -336,14 +344,16 @@ peqTemplate comp = phoistAcyclic $
 --
 -- Due to Plutarch weird-ness, probably, Scott-encoded
 -- negative Integers, all "codes" should be positive number.
-
-classifiedTemplate ::
+ppropertyTemplate ::
     forall (c :: S -> Type) (d :: S -> Type) (s :: S).
     (PEq d) =>
+    -- | The computation to test.
     (forall (s' :: S). Term s' (c :--> d)) ->
+    -- | Given a Plutarch equivalent to an input, constructs its corresponding
+    -- expected result. Returns 'PNothing' to signal expected failure.
     (forall (s' :: S). Term s' (c :--> PMaybe d)) ->
     Term s (c :--> PInteger)
-classifiedTemplate comp getOutcome = phoistAcyclic $
+ppropertyTemplate comp getOutcome = phoistAcyclic $
     plam $ \input -> unTermCont $ do
         actual <- tclet (comp # input)
         expectedMay <- tcmatch (getOutcome # input)
@@ -351,12 +361,15 @@ classifiedTemplate comp getOutcome = phoistAcyclic $
             PNothing -> 2
             PJust expected -> pif (expected #== actual) 0 1
 
-classifiedTemplateNativeEx ::
+-- | The resulting Plutarch function tests the computation, given the input and
+-- expected outcome. For return codes see 'ppropertyTemplate'.
+ppropertyTemplateNativeEx ::
     forall (c :: S -> Type) (d :: S -> Type) (s :: S).
     (PEq d) =>
+    -- | The computation to test.
     (forall (s' :: S). Term s' (c :--> d)) ->
     Term s (c :--> PMaybe d :--> PInteger)
-classifiedTemplateNativeEx comp = phoistAcyclic $
+ppropertyTemplateNativeEx comp = phoistAcyclic $
     plam $ \input res -> unTermCont $ do
         actual <- tclet (comp # input)
         expectedMay <- tcmatch res
@@ -427,8 +440,9 @@ unexpectedError err = counterexample go . property $ False
 sameAsExpected :: Script -> Property
 sameAsExpected actual = counterexample wrongResult (canonTrue == actual)
 
-crashedWhenItShouldHave :: EvalError -> Script -> Property
-crashedWhenItShouldHave err actual = counterexample go (canonTrue == actual)
+handleCrashForExpectation :: EvalError -> Script -> Property
+handleCrashForExpectation err isCrashExpected =
+    counterexample go (canonTrue == isCrashExpected)
   where
     go :: String
     go =

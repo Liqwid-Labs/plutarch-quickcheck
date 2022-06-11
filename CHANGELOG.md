@@ -6,7 +6,8 @@ This format is based on [Keep A Changelog](https://keepachangelog.com/en/1.0.0).
 
 ### Added
 
-* `alwaysFailProperty` -- an universial property that ensures script always fails
+* `alwaysFailProperty`, to test the universal property that ensures a script 
+  always fails
 
 ### Fixed
 

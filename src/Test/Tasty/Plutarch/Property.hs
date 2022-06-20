@@ -37,15 +37,12 @@ import Data.Tagged (Tagged (Tagged))
 import Data.Text (Text)
 import Data.Universe (Finite (cardinality, universeF))
 import Plutarch (
-    PlutusType,
     S,
     Term,
-    TermCont,
     compile,
     pcon,
     phoistAcyclic,
     plam,
-    plet,
     pmatch,
     unTermCont,
     (#),
@@ -54,10 +51,10 @@ import Plutarch (
  )
 import Plutarch.Bool (PBool (PFalse, PTrue), PEq ((#==)), pif)
 import Plutarch.Evaluate (EvalError, evalScript)
+import Plutarch.Extra.TermCont (pletC, pmatchC)
 import Plutarch.Integer (PInteger)
 import Plutarch.Lift (PUnsafeLiftDecl (PLifted), pconstant)
 import Plutarch.Maybe (PMaybe (PJust, PNothing))
-import Plutarch.TermCont (tcont)
 import PlutusLedgerApi.V1.Scripts (Script)
 import Test.QuickCheck (
     Gen,
@@ -262,13 +259,13 @@ classifiedProperty getGen shr getOutcome classify comp = case cardinality @ix of
         case res of
             Right retCode ->
                 if
-                    | retCode == canon 2 -> counterexample ranOnCrash . property $ False
-                    | retCode == canon 0 -> property True
-                    | otherwise -> counterexample wrongResult . property $ False
+                        | retCode == canon 2 -> counterexample ranOnCrash . property $ False
+                        | retCode == canon 0 -> property True
+                        | otherwise -> counterexample wrongResult . property $ False
             Left e ->
                 let sTest = compile (pisNothing #$ getOutcome # pconstant input)
                     (testRes, _, _) = evalScript sTest
-                    in case testRes of
+                 in case testRes of
                         Left e' -> failCrashyGetOutcome e'
                         Right isCrashExpected ->
                             handleCrashForExpectation e isCrashExpected
@@ -331,7 +328,7 @@ classifiedPropertyNative getGen shr getOutcome classify comp = case cardinality 
                 else
                     let s = compile (pproperty # pconstant input # toPMaybe (getOutcome input))
                         (res, _, logs) = evalScript s
-                    in counterexample (prettyLogs logs)
+                     in counterexample (prettyLogs logs)
                             . ensureCovered inputClass
                             $ handleScriptResult res input
     handleScriptResult :: Either EvalError Script -> a -> Property
@@ -339,13 +336,13 @@ classifiedPropertyNative getGen shr getOutcome classify comp = case cardinality 
         case res of
             Right retCode ->
                 if
-                    | retCode == canon 2 -> counterexample ranOnCrash . property $ False
-                    | retCode == canon 0 -> property True
-                    | otherwise -> counterexample wrongResult . property $ False
+                        | retCode == canon 2 -> counterexample ranOnCrash . property $ False
+                        | retCode == canon 0 -> property True
+                        | otherwise -> counterexample wrongResult . property $ False
             Left e ->
                 let sIsCrashExpected = compile (pisNothing #$ toPMaybe (getOutcome input))
                     (testRes, _, _) = evalScript sIsCrashExpected
-                    in case testRes of
+                 in case testRes of
                         Left e' -> failCrashyGetOutcome e'
                         Right isCrashExpected -> handleCrashForExpectation e isCrashExpected
 
@@ -368,21 +365,22 @@ peqTemplate comp = phoistAcyclic $
     plam $ \expected input ->
         expected #== comp # input
 
--- | The resulting Plutarch function tests the given computation.
---
--- Note from Seungheon!
--- Here, Template is using old fashion C-style
--- error handler--it uses integer for different types
--- of possibilities. We do not want to use custom datatype
--- or PMaybe as it will either have Scott-encoded weirdness
--- or much longer code.
---
--- 0 - failure
--- 1 - success
--- 2 - unexpected success
---
--- Due to Plutarch weird-ness, probably, Scott-encoded
--- negative Integers, all "codes" should be positive number.
+{- | The resulting Plutarch function tests the given computation.
+
+ Note from Seungheon!
+ Here, Template is using old fashion C-style
+ error handler--it uses integer for different types
+ of possibilities. We do not want to use custom datatype
+ or PMaybe as it will either have Scott-encoded weirdness
+ or much longer code.
+
+ 0 - failure
+ 1 - success
+ 2 - unexpected success
+
+ Due to Plutarch weird-ness, probably, Scott-encoded
+ negative Integers, all "codes" should be positive number.
+-}
 ppropertyTemplate ::
     forall (c :: S -> Type) (d :: S -> Type) (s :: S).
     (PEq d) =>
@@ -394,14 +392,15 @@ ppropertyTemplate ::
     Term s (c :--> PInteger)
 ppropertyTemplate comp getOutcome = phoistAcyclic $
     plam $ \input -> unTermCont $ do
-        actual <- tclet (comp # input)
-        expectedMay <- tcmatch (getOutcome # input)
+        actual <- pletC (comp # input)
+        expectedMay <- pmatchC (getOutcome # input)
         pure $ case expectedMay of
             PNothing -> 2
             PJust expected -> pif (expected #== actual) 0 1
 
--- | The resulting Plutarch function tests the computation, given the input and
--- expected outcome. For return codes see 'ppropertyTemplate'.
+{- | The resulting Plutarch function tests the computation, given the input and
+ expected outcome. For return codes see 'ppropertyTemplate'.
+-}
 ppropertyTemplateNativeEx ::
     forall (c :: S -> Type) (d :: S -> Type) (s :: S).
     (PEq d) =>
@@ -410,8 +409,8 @@ ppropertyTemplateNativeEx ::
     Term s (c :--> PMaybe d :--> PInteger)
 ppropertyTemplateNativeEx comp = phoistAcyclic $
     plam $ \input res -> unTermCont $ do
-        actual <- tclet (comp # input)
-        expectedMay <- tcmatch res
+        actual <- pletC (comp # input)
+        expectedMay <- pmatchC res
         pure $ case expectedMay of
             PNothing -> 2
             PJust expected -> pif (expected #== actual) 0 1
@@ -526,19 +525,6 @@ ensureCovered inputClass =
     probability =
         let Tagged k = cardinality @ix
          in 100.0 / fromIntegral k
-
-tclet ::
-    forall (a :: S -> Type) (s :: S).
-    Term s a ->
-    TermCont s (Term s a)
-tclet t = tcont (plet t)
-
-tcmatch ::
-    forall (a :: S -> Type) (s :: S).
-    (PlutusType a) =>
-    Term s a ->
-    TermCont s (a s)
-tcmatch t = tcont (pmatch t)
 
 canonTrue :: Script
 canonTrue = compile (pcon PTrue)

@@ -21,6 +21,7 @@ module Test.Tasty.Plutarch.Property (
     -- * Basic Plutarch Input-Dependent Properties
     peqCanFailProperty,
     peqCanFailPropertyNative,
+    peqConstCanFailProperty,
     peqConstProperty,
     peqPropertyNative,
 
@@ -43,6 +44,7 @@ module Test.Tasty.Plutarch.Property (
 ) where
 
 import Control.Monad (guard)
+import Data.Functor ((<&>))
 import Data.Kind (Type)
 import Data.Monoid (Endo (Endo), appEndo)
 import Data.Tagged (Tagged (Tagged))
@@ -198,13 +200,8 @@ peqCanFailProperty ::
     -- | The input for the function, on the Haskell level.
     a ->
     Property
-peqCanFailProperty getOutcome comp input =
-    counterexample (prettyLogs logs) $ handleScriptResult res pexpected
-  where
-    pexpected :: forall s. Term s (PMaybe r)
-    pexpected = getOutcome # pconstant input
-    script = compile (ppropertyTemplate comp getOutcome # pconstant input)
-    (res, _, logs) = evalScript script
+peqCanFailProperty pgetOutcome comp input =
+    peqConstCanFailProperty (pgetOutcome # pconstant input) comp input
 
 peqCanFailPropertyNative ::
     forall (a :: Type) (r :: Type) (pa :: S -> Type) (pr :: S -> Type).
@@ -223,11 +220,29 @@ peqCanFailPropertyNative ::
     a ->
     Property
 peqCanFailPropertyNative getOutcome comp input =
+    peqConstCanFailProperty (toPMaybe $ getOutcome input) comp input
+
+{- | Input-dependent equality property on fallible Plutarch functions, using a
+ Plutarch expectation function.
+-}
+peqConstCanFailProperty ::
+    forall (a :: Type) (pa :: S -> Type) (r :: S -> Type).
+    ( PEq r
+    , PUnsafeLiftDecl pa
+    , PLifted pa ~ a
+    ) =>
+    -- | The expected result, wrapped in 'PMaybe'. Returns 'PNothing'
+    -- to signal expected failure.
+    (forall (s :: S). Term s (PMaybe r)) ->
+    -- | The function being tested.
+    (forall (s :: S). Term s (pa :--> r)) ->
+    -- | The input for the function, on the Haskell level.
+    a ->
+    Property
+peqConstCanFailProperty pexpected comp input =
     counterexample (prettyLogs logs) $ handleScriptResult res pexpected
   where
-    pexpected :: forall s. Term s (PMaybe pr)
-    pexpected = toPMaybe (getOutcome input)
-    script = compile (ppropertyTemplateNativeEx comp # pconstant input # pexpected)
+    script = compile (peqCanFailTemplate pexpected (comp # pconstant input))
     (res, _, logs) = evalScript script
 
 {- | Input-dependent equality property on Plutarch functions that are not
@@ -244,7 +259,7 @@ peqConstProperty ::
     a ->
     Property
 peqConstProperty expected comp input =
-    let s = compile (peqTemplate comp # expected # pconstant input)
+    let s = compile (expected #== comp # pconstant input)
         (res, _, logs) = evalScript s
      in counterexample (prettyLogs logs) $ case res of
             Left e -> unexpectedError e
@@ -269,13 +284,7 @@ peqPropertyNative ::
     a ->
     Property
 peqPropertyNative getExpected comp input =
-    let expected :: Term s' d
-        expected = pconstant $ getExpected input
-        s = compile (peqTemplate comp # expected # pconstant input)
-        (res, _, logs) = evalScript s
-     in counterexample (prettyLogs logs) $ case res of
-            Left e -> unexpectedError e
-            Right s' -> sameAsExpected s'
+    peqConstProperty (pconstant $ getExpected input) comp input
 
 -- Quantified Plutarch Properties
 
@@ -466,15 +475,6 @@ classifiedPropertyNative getGen shr getOutcome classify comp =
 
 -- Templates
 
-peqTemplate ::
-    forall (c :: S -> Type) (d :: S -> Type) (s :: S).
-    (PEq d) =>
-    (forall (s' :: S). Term s' (c :--> d)) ->
-    Term s (d :--> c :--> PBool)
-peqTemplate comp = phoistAcyclic $
-    plam $ \expected input ->
-        expected #== comp # input
-
 {- | The resulting Plutarch function tests the given computation.
 
  Note from Seungheon!
@@ -491,43 +491,23 @@ peqTemplate comp = phoistAcyclic $
  Due to Plutarch weird-ness, probably, Scott-encoded
  negative Integers, all "codes" should be positive number.
 -}
-ppropertyTemplate ::
-    forall (c :: S -> Type) (d :: S -> Type) (s :: S).
+peqCanFailTemplate ::
+    forall (d :: S -> Type) (s :: S).
     (PEq d) =>
+    -- | Expected result wrapped in 'PMaybe'. 'PNothing' to signal expected failure.
+    (forall (s' :: S). Term s' (PMaybe d)) ->
     -- | The computation to test.
-    (forall (s' :: S). Term s' (c :--> d)) ->
-    -- | Given a Plutarch equivalent to an input, constructs its corresponding
-    -- expected result. Returns 'PNothing' to signal expected failure.
-    (forall (s' :: S). Term s' (c :--> PMaybe d)) ->
-    Term s (c :--> PInteger)
-ppropertyTemplate comp getOutcome = phoistAcyclic $
-    plam $ \input -> unTermCont $ do
-        actual <- pletC (comp # input)
-        expectedMay <- pmatchC (getOutcome # input)
-        pure $ case expectedMay of
-            PNothing -> 2
-            PJust expected -> pif (expected #== actual) 0 1
-
-{- | The resulting Plutarch function tests the computation, given the input and
- expected outcome. For return codes see 'ppropertyTemplate'.
--}
-ppropertyTemplateNativeEx ::
-    forall (c :: S -> Type) (d :: S -> Type) (s :: S).
-    (PEq d) =>
-    -- | The computation to test.
-    (forall (s' :: S). Term s' (c :--> d)) ->
-    Term s (c :--> PMaybe d :--> PInteger)
-ppropertyTemplateNativeEx comp = phoistAcyclic $
-    plam $ \input res -> unTermCont $ do
-        actual <- pletC (comp # input)
-        expectedMay <- pmatchC res
-        pure $ case expectedMay of
-            PNothing -> 2
-            PJust expected -> pif (expected #== actual) 0 1
+    (forall (s' :: S). Term s' d) ->
+    Term s PInteger
+peqCanFailTemplate mayExpected comp = unTermCont $ do
+    actual <- pletC comp
+    pmatchC mayExpected <&> \case
+        PNothing -> 2
+        PJust expected -> pif (expected #== actual) 0 1
 
 -- Property handlers
 
--- | Common handler for the templates that allow expected failure.
+-- | Handler for 'peqCanFailTemplate'.
 handleScriptResult :: forall d. Either EvalError Script -> (forall (s :: S). Term s (PMaybe d)) -> Property
 handleScriptResult res pexpected =
     case res of

@@ -242,7 +242,7 @@ peqConstCanFailProperty ::
 peqConstCanFailProperty pexpected comp input =
     counterexample (prettyLogs logs) $ handleScriptResult res pexpected
   where
-    script = compile (peqCanFailTemplate pexpected (comp # pconstant input))
+    script = compile (ppredCompareCanFailTemplate (#==) pexpected (comp # pconstant input))
     (res, _, logs) = evalScript script
 
 {- | Input-dependent equality property on Plutarch functions that are not
@@ -491,19 +491,20 @@ classifiedPropertyNative getGen shr getOutcome classify comp =
  Due to Plutarch weird-ness, probably, Scott-encoded
  negative Integers, all "codes" should be positive number.
 -}
-peqCanFailTemplate ::
-    forall (d :: S -> Type) (s :: S).
-    (PEq d) =>
-    -- | Expected result wrapped in 'PMaybe'. 'PNothing' to signal expected failure.
+ppredCompareCanFailTemplate ::
+    forall (d :: S -> Type) (e :: S -> Type) (s :: S).
+    -- | The predicate, used to judge the computation result by the comparison value.
+    (forall (s' :: S). Term s' d -> Term s' e -> Term s' PBool) ->
+    -- | Comparison value wrapped in 'PMaybe'. 'PNothing' to signal expected failure.
     (forall (s' :: S). Term s' (PMaybe d)) ->
     -- | The computation to test.
-    (forall (s' :: S). Term s' d) ->
+    (forall (s' :: S). Term s' e) ->
     Term s PInteger
-peqCanFailTemplate mayExpected comp = unTermCont $ do
+ppredCompareCanFailTemplate ppredicate mayComparisonVal comp = unTermCont $ do
     actual <- pletC comp
-    pmatchC mayExpected <&> \case
+    pmatchC mayComparisonVal <&> \case
         PNothing -> 2
-        PJust expected -> pif (expected #== actual) 0 1
+        PJust comparisonVal -> pif (ppredicate comparisonVal actual) 0 1
 
 -- Property handlers
 

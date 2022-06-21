@@ -15,25 +15,30 @@
 -}
 module Test.Tasty.Plutarch.Property (
     -- * Haskell Property Combinators
-    classified,
-    classified',
+    classifiedForAllShrink,
+    classifiedForAllShrink',
 
-    -- * Plutarch Property Combinators
+    -- * Basic Plutarch Input-Dependent Properties
+    peqCanFailProperty,
+    peqCanFailPropertyNative,
+    peqConstProperty,
+    peqPropertyNative,
 
-    -- ** Basic properties
+    -- * Quantified Plutarch Properties
+
+    -- ** Basic Properties
     peqProperty,
 
-    -- ** Basic properties with native Haskell
+    -- ** Basic Properties with Native Haskell
     peqPropertyNative',
-    -- TODO what is the ' about?
 
-    -- ** Properties that always should fail
+    -- ** Properties that Always Should Fail
     alwaysFailProperty,
 
-    -- ** Coverage-based properties
+    -- ** Coverage-Based Properties
     classifiedProperty,
 
-    -- ** Coverage-based properties with native Haskell
+    -- ** Coverage-Based Properties with Native Haskell
     classifiedPropertyNative,
 ) where
 
@@ -105,7 +110,7 @@ instance Show MyInputClass where
         TooBig -> "too big"
 @
 -}
-classified ::
+classifiedForAllShrink ::
     forall (a :: Type) (ix :: Type).
     ( Show a
     , Finite ix
@@ -129,7 +134,7 @@ classified ::
     -- be used by the thing being tested.
     (ix -> a -> Property) ->
     Property
-classified getGen classify shr prop = case cardinality @ix of
+classifiedForAllShrink getGen classify shr prop = case cardinality @ix of
     Tagged 0 -> failOutNoCases
     Tagged 1 -> failOutOneCase
     _ -> forAllShrinkShow gen shr' (showInput . snd) go
@@ -149,10 +154,10 @@ classified getGen classify shr prop = case cardinality @ix of
                 then failedClassification inputClass actualClass
                 else ensureCovered inputClass (prop inputClass input)
 
-{- | Simpler version of 'classified' that doesn't pass the class to the shrinker and property.
- TODO needed?
+{- | Simpler version of 'classifiedForAllShrink' that doesn't pass the class to
+ the shrinker and property.
 -}
-classified' ::
+classifiedForAllShrink' ::
     forall (a :: Type) (ix :: Type).
     ( Show a
     , Finite ix
@@ -170,9 +175,109 @@ classified' ::
     -- | The 'Property' depending on the input.
     (a -> Property) ->
     Property
-classified' getGen classify shr prop = classified getGen classify (const shr) (const prop)
+-- TODO needed?
+classifiedForAllShrink' getGen classify shr prop =
+    classifiedForAllShrink getGen classify (const shr) (const prop)
 
--- Plutarch Property combinators
+-- Basic Plutarch Input-Dependent Properties
+
+{- | Input-dependent equality property on fallible Plutarch functions, using a
+ Plutarch expectation function.
+-}
+peqCanFailProperty ::
+    forall (a :: Type) (pa :: S -> Type) (r :: S -> Type).
+    ( PEq r
+    , PUnsafeLiftDecl pa
+    , PLifted pa ~ a
+    ) =>
+    -- | Constructs the expected result, wrapped in 'PMaybe'. Returns 'PNothing'
+    -- to signal expected failure.
+    (forall (s :: S). Term s (pa :--> PMaybe r)) ->
+    -- | The function being tested.
+    (forall (s :: S). Term s (pa :--> r)) ->
+    -- | The input for the function, on the Haskell level.
+    a ->
+    Property
+peqCanFailProperty getOutcome comp input =
+    counterexample (prettyLogs logs) $ handleScriptResult res pexpected
+  where
+    pexpected :: forall s. Term s (PMaybe r)
+    pexpected = getOutcome # pconstant input
+    script = compile (ppropertyTemplate comp getOutcome # pconstant input)
+    (res, _, logs) = evalScript script
+
+peqCanFailPropertyNative ::
+    forall (a :: Type) (r :: Type) (pa :: S -> Type) (pr :: S -> Type).
+    ( PEq pr
+    , PUnsafeLiftDecl pa
+    , PUnsafeLiftDecl pr
+    , PLifted pa ~ a
+    , PLifted pr ~ r
+    ) =>
+    -- | Constructs the expected result on the Haskell level, wrapped in
+    -- 'Maybe'. Returns 'Nothing' to signal expected failure.
+    (a -> Maybe r) ->
+    -- | The function being tested.
+    (forall (s :: S). Term s (pa :--> pr)) ->
+    -- | The input for the function, on the Haskell level.
+    a ->
+    Property
+peqCanFailPropertyNative getOutcome comp input =
+    counterexample (prettyLogs logs) $ handleScriptResult res pexpected
+  where
+    pexpected :: forall s. Term s (PMaybe pr)
+    pexpected = toPMaybe (getOutcome input)
+    script = compile (ppropertyTemplateNativeEx comp # pconstant input # pexpected)
+    (res, _, logs) = evalScript script
+
+{- | Input-dependent equality property on Plutarch functions that are not
+ expected to fail, using a constant Plutarch term for the expected value.
+-}
+peqConstProperty ::
+    forall (a :: Type) (c :: S -> Type) (d :: S -> Type).
+    (PLifted c ~ a, PEq d, PUnsafeLiftDecl c) =>
+    -- | The expected result.
+    (forall (s :: S). Term s d) ->
+    -- | The function being tested.
+    (forall (s :: S). Term s (c :--> d)) ->
+    -- | The input for the function, on the Haskell level.
+    a ->
+    Property
+peqConstProperty expected comp input =
+    let s = compile (peqTemplate comp # expected # pconstant input)
+        (res, _, logs) = evalScript s
+     in counterexample (prettyLogs logs) $ case res of
+            Left e -> unexpectedError e
+            Right s' -> sameAsExpected s'
+
+{- | Input-dependent equality property on Plutarch functions that are not
+ expected to fail, using a Haskell function to construct the expected value.
+-}
+peqPropertyNative ::
+    forall (a :: Type) (b :: Type) (c :: S -> Type) (d :: S -> Type).
+    ( PLifted c ~ a
+    , PLifted d ~ b
+    , PEq d
+    , PUnsafeLiftDecl c
+    , PUnsafeLiftDecl d
+    ) =>
+    -- | Given an input value, returns the expected value.
+    (a -> b) ->
+    -- | The function being tested.
+    (forall (s :: S). Term s (c :--> d)) ->
+    -- | The input for the function, on the Haskell level.
+    a ->
+    Property
+peqPropertyNative getExpected comp input =
+    let expected :: Term s' d
+        expected = pconstant $ getExpected input
+        s = compile (peqTemplate comp # expected # pconstant input)
+        (res, _, logs) = evalScript s
+     in counterexample (prettyLogs logs) $ case res of
+            Left e -> unexpectedError e
+            Right s' -> sameAsExpected s'
+
+-- Quantified Plutarch Properties
 
 {- | Given an expected result, and a generator and shrinker for inputs, run the
  given computation on the generated input, ensuring that it always matches the
@@ -194,19 +299,9 @@ peqProperty ::
     (a -> [a]) ->
     (forall (s :: S). Term s (c :--> d)) ->
     Property
+-- TODO this should probably just be thrown out
 peqProperty expected gen shr comp =
-    forAllShrinkShow gen shr showInput (go (peqTemplate comp))
-  where
-    go ::
-        (forall (s' :: S). Term s' (d :--> c :--> PBool)) ->
-        a ->
-        Property
-    go precompiled input =
-        let s = compile (precompiled # expected # pconstant input)
-            (res, _, logs) = evalScript s
-         in counterexample (prettyLogs logs) $ case res of
-                Left e -> unexpectedError e
-                Right s' -> sameAsExpected s'
+    forAllShrinkShow gen shr showInput (peqConstProperty expected comp)
 
 {- | Have the same functionalities as 'peqProperty' but allow generating
  expeceted result using a Haskell function.
@@ -228,21 +323,9 @@ peqPropertyNative' ::
     (a -> [a]) ->
     (forall (s :: S). Term s (c :--> d)) ->
     Property
+-- TODO this should probably just be thrown out
 peqPropertyNative' getExpected gen shr comp =
-    forAllShrinkShow gen shr showInput (go (peqTemplate comp))
-  where
-    go ::
-        (forall (s' :: S). Term s' (d :--> c :--> PBool)) ->
-        a ->
-        Property
-    go precompiled input =
-        let expected :: Term s' d
-            expected = pconstant $ getExpected input
-            s = compile (precompiled # expected # pconstant input)
-            (res, _, logs) = evalScript s
-         in counterexample (prettyLogs logs) $ case res of
-                Left e -> unexpectedError e
-                Right s' -> sameAsExpected s'
+    forAllShrinkShow gen shr showInput (peqPropertyNative getExpected comp)
 
 {- | 'alwaysFailProperty' universally checks if given computation fails.
  This runs the given script with generated input; it makes sure that
@@ -328,16 +411,11 @@ classifiedProperty ::
     -- | The computation to test.
     (forall (s :: S). Term s (c :--> d)) ->
     Property
--- TODO make input order like in classified?
+-- TODO make input order like in classifiedForAllShrink?
 -- TODO allow class dependent shrinker and expecter?
-classifiedProperty getGen shr getOutcome classify comp = classified' getGen classify shr prop
-  where
-    prop input = counterexample (prettyLogs logs) $ handleScriptResult res pexpected
-      where
-        pexpected :: forall s'. Term s' (PMaybe d)
-        pexpected = getOutcome # pconstant input
-        script = compile (ppropertyTemplate comp getOutcome # pconstant input)
-        (res, _, logs) = evalScript script
+-- TODO this should probably just be thrown out, users can compose those two functions themselves
+classifiedProperty getGen shr getOutcome classify comp =
+    classifiedForAllShrink' getGen classify shr (peqCanFailProperty getOutcome comp)
 
 {- | Identical to @classifiedProperty@ but it receives expected result
    in Haskell function instead of Plutarch function. As a result it
@@ -374,24 +452,17 @@ classifiedPropertyNative ::
     -- | The computation to test.
     (forall (s :: S). Term s (c :--> d)) ->
     Property
--- TODO make input order like in classified?
+-- TODO make input order like in classifiedForAllShrink?
 -- TODO allow class dependent shrinker and expecter?
-classifiedPropertyNative getGen shr getOutcome classify comp = classified' getGen classify shr prop
-  where
-    prop input = counterexample (prettyLogs logs) $ handleScriptResult res pexpected
-      where
-        pexpected :: forall s'. Term s' (PMaybe d)
-        pexpected = toPMaybe (getOutcome input)
-        script = compile (ppropertyTemplateNativeEx comp # pconstant input # pexpected)
-        (res, _, logs) = evalScript script
+-- TODO this should probably just be thrown out, users can compose those two functions themselves
+classifiedPropertyNative getGen shr getOutcome classify comp =
+    classifiedForAllShrink' getGen classify shr (peqCanFailPropertyNative getOutcome comp)
 
 -- Note from Koz
 --
 -- The 'double lift' in the above definition is definitely quite suboptimal.
 -- However, there seems to be no way to let-bind the result of pconstant while
 -- simultaneously convincing GHC it's closed.
-
--- Helpers
 
 -- Templates
 

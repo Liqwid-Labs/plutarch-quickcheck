@@ -14,19 +14,26 @@
  Helpers for @tasty-quickcheck@ to write property tests for Plutarch.
 -}
 module Test.Tasty.Plutarch.Property (
-    -- * Basic properties
+    -- * Haskell Property Combinators
+    classified,
+    classified',
+
+    -- * Plutarch Property Combinators
+
+    -- ** Basic properties
     peqProperty,
 
-    -- * Basic properties with native Haskell
+    -- ** Basic properties with native Haskell
     peqPropertyNative',
+    -- TODO what is the ' about?
 
-    -- * Properties that always should fail
+    -- ** Properties that always should fail
     alwaysFailProperty,
 
-    -- * Coverage-based properties
+    -- ** Coverage-based properties
     classifiedProperty,
 
-    -- * Coverage-based properties with native Haskell
+    -- ** Coverage-based properties with native Haskell
     classifiedPropertyNative,
 ) where
 
@@ -73,6 +80,99 @@ import Text.PrettyPrint (
     vcat,
  )
 import Text.Show.Pretty (ppDoc, ppShow)
+
+-- Haskell Property combinators
+-- TODO they should probably live in another lib, independent of Plutarch
+-- TODO custom class for pretty input classes? Show is not inteded for generating pretty messages.
+
+{- | Run a property based on verified input classes, ensuring equal coverage of all classes.
+
+Set up your input class like this:
+
+@
+data MyInputClass = TooSmall | JustFine | TooBig
+  deriving stock (Eq, Enum, Bounded)
+
+-- the default implementations work fine, they only need 'Enum' and 'Bounded'
+instance Universe MyInputClass
+instance Finite MyInputClass
+
+-- pretty case distribution message
+instance Show MyInputClass where
+    show = \case
+        TooSmall -> "too small"
+        CorrectSize -> "correct size"
+        TooBig -> "too big"
+@
+-}
+classified ::
+    forall (a :: Type) (ix :: Type).
+    ( Show a
+    , Finite ix
+    , Eq ix
+    , Show ix
+    ) =>
+    -- | Class-dependent input generator. Gets verified by the classifier function below.
+    (ix -> Gen a) ->
+    -- | A \'classifier function\' for generated inputs. Used to verify the generator output.
+    (a -> ix) ->
+    -- | A shrinker for the generated inputs.
+    --
+    -- Shrunken inputs that change the input class get filtered out. The class
+    -- parameter can be used to increase efficiency by not generating
+    -- class-changing shrinks in the first place.
+    (ix -> a -> [a]) ->
+    -- | The 'Property' depending on the input.
+    --
+    -- The class parameter can be used to simplify verifying results, for
+    -- example if a certain class should always result in failure. It should not
+    -- be used by the thing being tested.
+    (ix -> a -> Property) ->
+    Property
+classified getGen classify shr prop = case cardinality @ix of
+    Tagged 0 -> failOutNoCases
+    Tagged 1 -> failOutOneCase
+    _ -> forAllShrinkShow gen shr' (showInput . snd) go
+  where
+    gen :: Gen (ix, a)
+    gen = do
+        ix <- elements universeF
+        (ix,) <$> getGen ix
+    shr' :: (ix, a) -> [(ix, a)]
+    shr' (ix, x) = do
+        x' <- shr ix x
+        guard (classify x' == ix)
+        pure (ix, x')
+    go (inputClass, input) =
+        let actualClass = classify input
+         in if inputClass /= actualClass
+                then failedClassification inputClass actualClass
+                else ensureCovered inputClass (prop inputClass input)
+
+{- | Simpler version of 'classified' that doesn't pass the class to the shrinker and property.
+ TODO needed?
+-}
+classified' ::
+    forall (a :: Type) (ix :: Type).
+    ( Show a
+    , Finite ix
+    , Eq ix
+    , Show ix
+    ) =>
+    -- | Class-dependent input generator. Gets verified by the classifier function below.
+    (ix -> Gen a) ->
+    -- | A \'classifier function\' for generated inputs. Used to verify the generator output.
+    (a -> ix) ->
+    -- | A shrinker for the generated inputs.
+    --
+    -- Shrunken inputs that change the input class get filtered out.
+    (a -> [a]) ->
+    -- | The 'Property' depending on the input.
+    (a -> Property) ->
+    Property
+classified' getGen classify shr prop = classified getGen classify (const shr) (const prop)
+
+-- Plutarch Property combinators
 
 {- | Given an expected result, and a generator and shrinker for inputs, run the
  given computation on the generated input, ensuring that it always matches the
@@ -217,6 +317,8 @@ classifiedProperty ::
     -- appropriate case: a test iteration will fail if this doesn't happen.
     (ix -> Gen a) ->
     -- | A shrinker for inputs.
+    --
+    -- Shrunken inputs that change the input class get filtered out.
     (a -> [a]) ->
     -- | Given a Plutarch equivalent to an input, constructs its corresponding
     -- expected result. Returns 'PNothing' to signal expected failure.
@@ -226,49 +328,16 @@ classifiedProperty ::
     -- | The computation to test.
     (forall (s :: S). Term s (c :--> d)) ->
     Property
-classifiedProperty getGen shr getOutcome classify comp = case cardinality @ix of
-    Tagged 0 -> failOutNoCases
-    Tagged 1 -> failOutOneCase
-    _ -> forAllShrinkShow gen shr' (showInput . snd) (go (ppropertyTemplate comp getOutcome))
+-- TODO make input order like in classified?
+-- TODO allow class dependent shrinker and expecter?
+classifiedProperty getGen shr getOutcome classify comp = classified' getGen classify shr prop
   where
-    gen :: Gen (ix, a)
-    gen = do
-        ix <- elements universeF
-        (ix,) <$> getGen ix
-    shr' :: (ix, a) -> [(ix, a)]
-    shr' (ix, x) = do
-        x' <- shr x
-        guard (classify x' == ix)
-        pure (ix, x')
-    go ::
-        (forall (s' :: S). Term s' (c :--> PInteger)) ->
-        (ix, a) ->
-        Property
-    go pproperty (inputClass, input) =
-        let actualClass = classify input
-         in if inputClass /= actualClass
-                then failedClassification inputClass actualClass
-                else
-                    let s = compile (pproperty # pconstant input)
-                        (res, _, logs) = evalScript s
-                     in counterexample (prettyLogs logs)
-                            . ensureCovered inputClass
-                            $ handleScriptResult res input
-    handleScriptResult :: Either EvalError Script -> a -> Property
-    handleScriptResult res input =
-        case res of
-            Right retCode ->
-                if
-                        | retCode == canon 2 -> counterexample ranOnCrash . property $ False
-                        | retCode == canon 0 -> property True
-                        | otherwise -> counterexample wrongResult . property $ False
-            Left e ->
-                let sTest = compile (pisNothing #$ getOutcome # pconstant input)
-                    (testRes, _, _) = evalScript sTest
-                 in case testRes of
-                        Left e' -> failCrashyGetOutcome e'
-                        Right isCrashExpected ->
-                            handleCrashForExpectation e isCrashExpected
+    prop input = counterexample (prettyLogs logs) $ handleScriptResult res pexpected
+      where
+        pexpected :: forall s'. Term s' (PMaybe d)
+        pexpected = getOutcome # pconstant input
+        script = compile (ppropertyTemplate comp getOutcome # pconstant input)
+        (res, _, logs) = evalScript script
 
 {- | Identical to @classifiedProperty@ but it receives expected result
    in Haskell function instead of Plutarch function. As a result it
@@ -294,6 +363,8 @@ classifiedPropertyNative ::
     -- case: a test iteration will fail if this doesn't happen.
     (ix -> Gen a) ->
     -- | A shrinker for inputs.
+    --
+    -- Shrunken inputs that change the input class get filtered out.
     (a -> [a]) ->
     -- | Given an input value, constructs its corresponding expected result.
     -- Returns 'Nothing' to signal expected failure.
@@ -303,48 +374,16 @@ classifiedPropertyNative ::
     -- | The computation to test.
     (forall (s :: S). Term s (c :--> d)) ->
     Property
-classifiedPropertyNative getGen shr getOutcome classify comp = case cardinality @ix of
-    Tagged 0 -> failOutNoCases
-    Tagged 1 -> failOutOneCase
-    _ -> forAllShrinkShow gen shr' (showInput . snd) (go (ppropertyTemplateNativeEx comp))
+-- TODO make input order like in classified?
+-- TODO allow class dependent shrinker and expecter?
+classifiedPropertyNative getGen shr getOutcome classify comp = classified' getGen classify shr prop
   where
-    gen :: Gen (ix, a)
-    gen = do
-        ix <- elements universeF
-        (ix,) <$> getGen ix
-    shr' :: (ix, a) -> [(ix, a)]
-    shr' (ix, x) = do
-        x' <- shr x
-        guard (classify x' == ix)
-        pure (ix, x')
-    go ::
-        (forall (s' :: S). Term s' (c :--> PMaybe d :--> PInteger)) ->
-        (ix, a) ->
-        Property
-    go pproperty (inputClass, input) =
-        let actualClass = classify input
-         in if inputClass /= actualClass
-                then failedClassification inputClass actualClass
-                else
-                    let s = compile (pproperty # pconstant input # toPMaybe (getOutcome input))
-                        (res, _, logs) = evalScript s
-                     in counterexample (prettyLogs logs)
-                            . ensureCovered inputClass
-                            $ handleScriptResult res input
-    handleScriptResult :: Either EvalError Script -> a -> Property
-    handleScriptResult res input =
-        case res of
-            Right retCode ->
-                if
-                        | retCode == canon 2 -> counterexample ranOnCrash . property $ False
-                        | retCode == canon 0 -> property True
-                        | otherwise -> counterexample wrongResult . property $ False
-            Left e ->
-                let sIsCrashExpected = compile (pisNothing #$ toPMaybe (getOutcome input))
-                    (testRes, _, _) = evalScript sIsCrashExpected
-                 in case testRes of
-                        Left e' -> failCrashyGetOutcome e'
-                        Right isCrashExpected -> handleCrashForExpectation e isCrashExpected
+    prop input = counterexample (prettyLogs logs) $ handleScriptResult res pexpected
+      where
+        pexpected :: forall s'. Term s' (PMaybe d)
+        pexpected = toPMaybe (getOutcome input)
+        script = compile (ppropertyTemplateNativeEx comp # pconstant input # pexpected)
+        (res, _, logs) = evalScript script
 
 -- Note from Koz
 --
@@ -415,25 +454,23 @@ ppropertyTemplateNativeEx comp = phoistAcyclic $
             PNothing -> 2
             PJust expected -> pif (expected #== actual) 0 1
 
-toPMaybe ::
-    forall (a :: Type) (c :: S -> Type) (s :: S).
-    ( PLifted c ~ a
-    , PUnsafeLiftDecl c
-    ) =>
-    Maybe a ->
-    Term s (PMaybe c)
-toPMaybe (Just x) = pcon $ PJust $ pconstant x
-toPMaybe Nothing = pcon PNothing
-
-pisNothing ::
-    forall (a :: S -> Type) (s :: S).
-    Term s (PMaybe a :--> PBool)
-pisNothing = phoistAcyclic $
-    plam $ \t -> pmatch t $ \case
-        PNothing -> pcon PTrue
-        PJust _ -> pcon PFalse
-
 -- Property handlers
+
+-- | Common handler for the templates that allow expected failure.
+handleScriptResult :: forall d. Either EvalError Script -> (forall (s :: S). Term s (PMaybe d)) -> Property
+handleScriptResult res pexpected =
+    case res of
+        Right retCode ->
+            if
+                    | retCode == canon 2 -> counterexample ranOnCrash . property $ False
+                    | retCode == canon 0 -> property True
+                    | otherwise -> counterexample wrongResult . property $ False
+        Left e ->
+            let sIsCrashExpected = compile (pisNothing #$ pexpected)
+                (testRes, _, _) = evalScript sIsCrashExpected
+             in case testRes of
+                    Left e' -> failCrashyGetOutcome e'
+                    Right isCrashExpected -> handleCrashForExpectation e isCrashExpected
 
 ranOnCrash :: String
 ranOnCrash = "A case which should have crashed ran successfully instead."
@@ -537,3 +574,23 @@ prettyLogs =
     renderStyle ourStyle . \case
         [] -> "No logs found.\n" <> "Did you forget to build Plutarch with +development?"
         logs -> hang "Logs" 4 (vcat . fmap ppDoc $ logs)
+
+-- Missing Plutarch functions. Candidates for liqwid-plutarch-extra?
+
+toPMaybe ::
+    forall (a :: Type) (c :: S -> Type) (s :: S).
+    ( PLifted c ~ a
+    , PUnsafeLiftDecl c
+    ) =>
+    Maybe a ->
+    Term s (PMaybe c)
+toPMaybe (Just x) = pcon $ PJust $ pconstant x
+toPMaybe Nothing = pcon PNothing
+
+pisNothing ::
+    forall (a :: S -> Type) (s :: S).
+    Term s (PMaybe a :--> PBool)
+pisNothing = phoistAcyclic $
+    plam $ \t -> pmatch t $ \case
+        PNothing -> pcon PTrue
+        PJust _ -> pcon PFalse

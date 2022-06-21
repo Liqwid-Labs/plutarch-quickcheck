@@ -15,6 +15,14 @@
 -}
 module Test.Tasty.Plutarch.Property (
     -- * Haskell Property Combinators
+
+    -- ** Dual Implementation
+    ImplChoice (..),
+    dualImplProp,
+    testDualImplProperty,
+    testDualImplGroup,
+
+    -- ** Input Class Coverage Combinators
     classifiedForAllShrink,
     classifiedForAllShrink',
 
@@ -73,6 +81,7 @@ import PlutusLedgerApi.V1.Scripts (Script)
 import Test.QuickCheck (
     Gen,
     Property,
+    Testable,
     checkCoverage,
     counterexample,
     cover,
@@ -80,7 +89,9 @@ import Test.QuickCheck (
     forAllShrinkShow,
     property,
  )
+import Test.Tasty (TestName, TestTree, testGroup)
 import Test.Tasty.Plutarch.Helpers (ourStyle)
+import Test.Tasty.QuickCheck (testProperty)
 import Text.PrettyPrint (
     hang,
     renderStyle,
@@ -89,6 +100,59 @@ import Text.PrettyPrint (
 import Text.Show.Pretty (ppDoc, ppShow)
 
 -- Haskell Property combinators
+
+--   Dual Implementation
+
+data ImplChoice = Haskell | Plutarch deriving stock (Eq, Ord, Show, Enum, Bounded)
+
+{- | Constructs an input-dependent dual-implementation Property.
+
+ This empowers the dual-implementation strategy: The property only needs to be
+ tested on the Haskell implementation, if the outputs of all implementations are
+ equal, as long as all inputs are generated in the exact same way. Using this,
+ the latter is guaranteed.
+
+ Can be composed with 'classifiedForAllShrink\''.
+
+ Leave the 'ImplChoice' parameter open and make use of 'testDualImplProperty'
+ and 'testDualImplGroup', as opposed to 'testProperty' and 'testGroup'.
+-}
+dualImplProp ::
+    forall (a :: Type) (b :: Type) (ra :: S -> Type) (rb :: S -> Type) (prop :: Type).
+    ( PLifted ra ~ a
+    , PLifted rb ~ b
+    , PUnsafeLiftDecl ra
+    , PUnsafeLiftDecl rb
+    , PEq rb
+    , Testable prop
+    ) =>
+    -- | The Haskell implementation.
+    (a -> b) ->
+    -- | The Plutarch implementation.
+    (forall (s :: S). Term s (ra :--> rb)) ->
+    -- | The property.
+    (a -> b -> prop) ->
+    -- | Choice of implementation.
+    ImplChoice ->
+    -- | Input value.
+    a ->
+    Property
+dualImplProp haskellImpl plutarchImpl prop =
+    \case
+        -- TODO could introduce a choice 'Both' to run both in the same Property
+        Haskell -> \a -> property $ prop a (haskellImpl a)
+        Plutarch -> peqPropertyNative haskellImpl plutarchImpl
+
+-- | Drop-in replacement for 'testProperty'.
+testDualImplProperty :: TestName -> (ImplChoice -> Property) -> (ImplChoice -> TestTree)
+testDualImplProperty testName = (testProperty testName .)
+
+-- | Drop-in replacement for 'testGroup'.
+testDualImplGroup :: TestName -> [ImplChoice -> TestTree] -> ImplChoice -> TestTree
+testDualImplGroup testName tests choice = testGroup testName (map ($ choice) tests)
+
+-- Input Class Coverage Combinators
+
 -- TODO they should probably live in another lib, independent of Plutarch
 -- TODO custom class for pretty input classes? Show is not inteded for generating pretty messages.
 

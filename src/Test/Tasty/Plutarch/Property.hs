@@ -144,7 +144,7 @@ peqPropertyNative' getExpected gen shr comp =
     go precompiled input =
         let expected :: Term s' d
             expected = pconstant $ getExpected input
-            s = compile (precompiled # expected # pconstant input)
+            s = mustCompile (precompiled # expected # pconstant input)
             (res, _, logs) = evalScript s
          in counterexample (prettyLogs logs) $ case res of
                 Left e -> unexpectedError e
@@ -327,7 +327,7 @@ classifiedPropertyNative getGen shr getOutcome classify comp = case cardinality 
         if ix /= classified
             then failedClassification ix classified
             else
-                let s = compile (precompiled # (pconstant input) # toPMaybe (getOutcome input))
+                let s = mustCompile (precompiled # (pconstant input) # toPMaybe (getOutcome input))
                     (res, _, logs) = evalScript s
                  in counterexample (prettyLogs logs)
                         . ensureCovered input classify
@@ -338,7 +338,7 @@ classifiedPropertyNative getGen shr getOutcome classify comp = case cardinality 
                                         | s' == canon 0 -> property True
                                         | otherwise -> counterexample wrongResult . property $ False
                             Left e ->
-                                let sTest = compile (pisNothing #$ toPMaybe (getOutcome input))
+                                let sTest = mustCompile (pisNothing #$ toPMaybe (getOutcome input))
                                     (testRes, _, _) = evalScript sTest
                                  in case testRes of
                                         Left e' -> failCrashyGetOutcome e'

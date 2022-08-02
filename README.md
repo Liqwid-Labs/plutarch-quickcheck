@@ -1,5 +1,4 @@
 # `plutarch-quickcheck`
-Public discussion and assistance can be found on [discord](https://discord.gg/yGkjxrYueB) @ #liqwid-plutarch-extra
 
 ## What is this?
 

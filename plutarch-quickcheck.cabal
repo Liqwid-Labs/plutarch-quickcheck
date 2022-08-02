@@ -91,7 +91,6 @@ library
   other-modules:   Test.Tasty.Plutarch.Helpers
   build-depends:
     , bytestring
-    , data-default
     , plutus-core
     , plutus-ledger-api
     , pretty

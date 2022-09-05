@@ -17,37 +17,37 @@ module Plutarch.Test.QuickCheck.Function (
 ) where
 
 import Control.Arrow (Arrow ((&&&)))
+import Data.Default (def)
 import Data.Kind (Type)
 import Data.List (intercalate, nubBy)
 import Data.Universe (Finite (universeF))
-import Data.Default (def)
-import Plutarch (S, Term, plam, (#), (#$), type (:-->), compile)
+import Plutarch (S, Term, compile, plam, (#), (#$), type (:-->))
 import Plutarch.Extra.Maybe (pmaybe)
 import Plutarch.Lift (PLift, PUnsafeLiftDecl (PLifted))
 import Plutarch.Maybe (pfromJust)
 import Plutarch.Prelude (
-    pcons,
-    pnil,
-    PPair (PPair),
-    PList,
     PEq,
     PIsListLike,
+    PList,
     PMaybe (PJust, PNothing),
+    PPair (PPair),
     pcon,
+    pcons,
     pfind,
     phoistAcyclic,
     pmatch,
+    pnil,
     (#==),
  )
 import Plutarch.Show (PShow)
 import Plutarch.Test.QuickCheck.Instances (
-    pconstantT,
+    PArbitrary (..),
+    PCoArbitrary (..),
     TestableTerm (
         TestableTerm,
         unTestableTerm
     ),
-    PArbitrary(..),
-    PCoArbitrary(..),    
+    pconstantT,
  )
 import Test.QuickCheck (
     Arbitrary (arbitrary, shrink),
@@ -96,15 +96,15 @@ instance
     where
     arbitrary =
         sized $ \r -> do
-          xs' <- vectorOf r (parbitrary :: Gen (TestableTerm a))
-          let xs = nubBy compScript xs'
-          ys <- traverse (($ (parbitrary :: Gen (TestableTerm b))) . coarbitrary) xs
-          let table = zip xs ys
+            xs' <- vectorOf r (parbitrary :: Gen (TestableTerm a))
+            let xs = nubBy compScript xs'
+            ys <- traverse (($ (parbitrary :: Gen (TestableTerm b))) . coarbitrary) xs
+            let table = zip xs ys
 
-          d <- parbitrary :: Gen (TestableTerm b)
-          return $ mkPFun table d
-        where
-            compScript (TestableTerm (compile def -> x)) (TestableTerm (compile def -> y)) = x == y
+            d <- parbitrary :: Gen (TestableTerm b)
+            return $ mkPFun table d
+      where
+        compScript (TestableTerm (compile def -> x)) (TestableTerm (compile def -> y)) = x == y
 
     shrink (PFun t d _) =
         [mkPFun t' d' | (t', d') <- shrink (t, d)]
@@ -137,10 +137,10 @@ showPFun (PFun t d _) =
         ++ "\n}"
 
 conTable :: [(TestableTerm a, TestableTerm b)] -> TestableTerm (PList (PPair a b))
-conTable table = foldr go (TestableTerm pnil) table
-    where
-      go :: (TestableTerm a, TestableTerm b) -> TestableTerm (PList (PPair a b)) -> TestableTerm (PList (PPair a b))
-      go (TestableTerm x, TestableTerm y) (TestableTerm ps) = TestableTerm $ pcons # (pcon $ PPair x y) # ps      
+conTable = foldr go (TestableTerm pnil)
+  where
+    go :: (TestableTerm a, TestableTerm b) -> TestableTerm (PList (PPair a b)) -> TestableTerm (PList (PPair a b))
+    go (TestableTerm x, TestableTerm y) (TestableTerm ps) = TestableTerm $ pcons # pcon (PPair x y) # ps
 
 plamTable ::
     forall (a :: S -> Type) (b :: S -> Type) (s :: S).
@@ -162,7 +162,7 @@ plamFinite ::
     Term s (a :--> b)
 plamFinite f = plam $ \x -> pfromJust #$ plookup # x # table
   where
-    table' = ((pconstantT . id) &&& (pconstantT . f)) <$> universeF
+    table' = (pconstantT &&& (pconstantT . f)) <$> universeF
     table = unTestableTerm $ conTable table'
 
 plookup ::
@@ -184,4 +184,4 @@ pfstPair = phoistAcyclic $ plam $ flip pmatch $ \(PPair x _) -> x
 psndPair ::
     forall (a :: S -> Type) (b :: S -> Type) (s :: S).
     Term s (PPair a b :--> b)
-psndPair = phoistAcyclic $ plam $ flip pmatch $ \(PPair _ x) -> x    
+psndPair = phoistAcyclic $ plam $ flip pmatch $ \(PPair _ x) -> x

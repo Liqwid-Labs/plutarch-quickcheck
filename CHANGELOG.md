@@ -2,6 +2,14 @@
 
 This format is based on [Keep A Changelog](https://keepachangelog.com/en/1.0.0).
 
+## 2.1.1 -- 2022-09-06
+
+### Changed
+
+* `PFun` does not require any `PLift` constraint on it's type variables. 
+  It enables function generation of multiple parameters, with `PPair`, 
+  generation of arbitrary function that receives or returns Scott and Data Pluts.
+
 ## 2.1.0 -- 2022-09-01
 
 ### Added

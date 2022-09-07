@@ -52,7 +52,6 @@ import Plutarch.Test.QuickCheck.Instances (
 import Test.QuickCheck (
     Arbitrary (arbitrary, shrink),
     CoArbitrary (coarbitrary),
-    Gen,
     sized,
     vectorOf,
  )
@@ -96,13 +95,12 @@ instance
     where
     arbitrary =
         sized $ \r -> do
-            xs' <- vectorOf r (parbitrary :: Gen (TestableTerm a))
+            xs' <- vectorOf r parbitrary
             let xs = nubBy compScript xs'
-            ys <- traverse (($ (parbitrary :: Gen (TestableTerm b))) . coarbitrary) xs
-            let table = zip xs ys
+            ys <- traverse (($ parbitrary) . coarbitrary) xs
 
-            d <- parbitrary :: Gen (TestableTerm b)
-            return $ mkPFun table d
+            d <- parbitrary
+            return $ mkPFun (zip xs ys) d
       where
         compScript (TestableTerm (compile def -> x)) (TestableTerm (compile def -> y)) = x == y
 
@@ -136,7 +134,14 @@ showPFun (PFun t d _) =
             )
         ++ "\n}"
 
-conTable :: [(TestableTerm a, TestableTerm b)] -> TestableTerm (PList (PPair a b))
+-- Puts Haskell list of paris into Soctt Pluts
+-- It uses Scott Plut to support not only `PLift` types but also
+-- any other Pluts. Using `PBuilinList` wouldn't allow anything but
+-- `PLift`s.
+conTable ::
+    forall (a :: S -> Type) (b :: S -> Type).
+    [(TestableTerm a, TestableTerm b)] ->
+    TestableTerm (PList (PPair a b))
 conTable = foldr go (TestableTerm pnil)
   where
     go :: (TestableTerm a, TestableTerm b) -> TestableTerm (PList (PPair a b)) -> TestableTerm (PList (PPair a b))

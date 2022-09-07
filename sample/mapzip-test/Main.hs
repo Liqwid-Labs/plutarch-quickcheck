@@ -22,25 +22,25 @@ mapzipProp :: Property
 mapzipProp = forAllShrink arbitrary shrink $ fromPFun test
   where
     test ::
-        Term
-            s
-            ( (PA :--> PBool)
-                :--> (PA :--> PA)
-                :--> PBuiltinList PA
-                :--> PBool
-            )
+      Term
+        s
+        ( (PA :--> PBool)
+            :--> (PA :--> PA)
+            :--> PBuiltinList PA
+            :--> PBool
+        )
     test = plam $ \f g x ->
-        pfilter # f # (pmap # g # x) #== pmap # g # (pfilter # f # x)
+      pfilter # f # (pmap # g # x) #== pmap # g # (pfilter # f # x)
 
 main :: IO ()
 main = do
-    -- This will fix some problems regarding text encoding.
-    setLocaleEncoding utf8
-    defaultMain . adjustOption go $
-        testGroup
-            ""
-            [ expectFail $ testProperty "map zip is equal to zip map" mapzipProp
-            ]
+  -- This will fix some problems regarding text encoding.
+  setLocaleEncoding utf8
+  defaultMain . adjustOption go $
+    testGroup
+      ""
+      [ expectFail $ testProperty "map zip is equal to zip map" mapzipProp
+      ]
   where
     -- 100 tests is way too small for a property test to search for a counterexample,
     -- it is recommanded to use at least 10,000. However, more is better.

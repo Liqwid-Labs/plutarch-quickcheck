@@ -9,11 +9,11 @@
 {-# LANGUAGE ViewPatterns #-}
 
 module Plutarch.Test.QuickCheck.Function (
-    PFun (..),
-    pattern PFn,
-    applyPFun,
-    plamTable,
-    plamFinite,
+  PFun (..),
+  pattern PFn,
+  applyPFun,
+  plamTable,
+  plamFinite,
 ) where
 
 import Control.Arrow (Arrow ((&&&)))
@@ -26,167 +26,167 @@ import Plutarch.Extra.Maybe (pmaybe)
 import Plutarch.Lift (PLift, PUnsafeLiftDecl (PLifted))
 import Plutarch.Maybe (pfromJust)
 import Plutarch.Prelude (
-    PEq,
-    PIsListLike,
-    PList,
-    PMaybe (PJust, PNothing),
-    PPair (PPair),
-    pcon,
-    pcons,
-    pfind,
-    phoistAcyclic,
-    pmatch,
-    pnil,
-    (#==),
+  PEq,
+  PIsListLike,
+  PList,
+  PMaybe (PJust, PNothing),
+  PPair (PPair),
+  pcon,
+  pcons,
+  pfind,
+  phoistAcyclic,
+  pmatch,
+  pnil,
+  (#==),
  )
 import Plutarch.Show (PShow)
 import Plutarch.Test.QuickCheck.Instances (
-    PArbitrary (..),
-    PCoArbitrary (..),
-    TestableTerm (
-        TestableTerm,
-        unTestableTerm
-    ),
-    pconstantT,
+  PArbitrary (..),
+  PCoArbitrary (..),
+  TestableTerm (
+    TestableTerm,
+    unTestableTerm
+  ),
+  pconstantT,
  )
 import Test.QuickCheck (
-    Arbitrary (arbitrary, shrink),
-    CoArbitrary (coarbitrary),
-    sized,
-    vectorOf,
+  Arbitrary (arbitrary, shrink),
+  CoArbitrary (coarbitrary),
+  sized,
+  vectorOf,
  )
 
 data PFun (a :: S -> Type) (b :: S -> Type) where
-    PFun ::
-        [(TestableTerm a, TestableTerm b)] ->
-        TestableTerm b ->
-        (TestableTerm (a :--> b)) ->
-        PFun a b
+  PFun ::
+    [(TestableTerm a, TestableTerm b)] ->
+    TestableTerm b ->
+    (TestableTerm (a :--> b)) ->
+    PFun a b
 
 {-# COMPLETE PFn #-}
 pattern PFn ::
-    forall (a :: S -> Type) (b :: S -> Type).
-    (forall (s :: S). Term s (a :--> b)) ->
-    PFun a b
+  forall (a :: S -> Type) (b :: S -> Type).
+  (forall (s :: S). Term s (a :--> b)) ->
+  PFun a b
 pattern PFn f <- (unTestableTerm . applyPFun -> f)
 
 applyPFun ::
-    forall (a :: S -> Type) (b :: S -> Type).
-    PFun a b ->
-    TestableTerm (a :--> b)
+  forall (a :: S -> Type) (b :: S -> Type).
+  PFun a b ->
+  TestableTerm (a :--> b)
 applyPFun (PFun _ _ f) = f
 
 mkPFun ::
-    forall (a :: S -> Type) (b :: S -> Type).
-    PEq a =>
-    [(TestableTerm a, TestableTerm b)] ->
-    TestableTerm b ->
-    PFun a b
+  forall (a :: S -> Type) (b :: S -> Type).
+  PEq a =>
+  [(TestableTerm a, TestableTerm b)] ->
+  TestableTerm b ->
+  PFun a b
 mkPFun t d = PFun t d $ TestableTerm $ plamTable t d
 
 instance
-    forall (a :: S -> Type) (b :: S -> Type).
-    ( PArbitrary a
-    , PArbitrary b
-    , PCoArbitrary a
-    , PEq a
-    ) =>
-    Arbitrary (PFun a b)
+  forall (a :: S -> Type) (b :: S -> Type).
+  ( PArbitrary a
+  , PArbitrary b
+  , PCoArbitrary a
+  , PEq a
+  ) =>
+  Arbitrary (PFun a b)
+  where
+  arbitrary =
+    sized $ \r -> do
+      xs' <- vectorOf r parbitrary
+      let xs = nubBy compScript xs'
+      ys <- traverse (($ parbitrary) . coarbitrary) xs
+
+      d <- parbitrary
+      return $ mkPFun (zip xs ys) d
     where
-    arbitrary =
-        sized $ \r -> do
-            xs' <- vectorOf r parbitrary
-            let xs = nubBy compScript xs'
-            ys <- traverse (($ parbitrary) . coarbitrary) xs
+      compScript (TestableTerm (compile def -> x)) (TestableTerm (compile def -> y)) = x == y
 
-            d <- parbitrary
-            return $ mkPFun (zip xs ys) d
-      where
-        compScript (TestableTerm (compile def -> x)) (TestableTerm (compile def -> y)) = x == y
-
-    shrink (PFun t d _) =
-        [mkPFun t' d' | (t', d') <- shrink (t, d)]
+  shrink (PFun t d _) =
+    [mkPFun t' d' | (t', d') <- shrink (t, d)]
 
 instance
-    forall (a :: S -> Type) (b :: S -> Type).
-    ( PShow a
-    , PShow b
-    ) =>
-    Show (PFun a b)
-    where
-    show = showPFun
+  forall (a :: S -> Type) (b :: S -> Type).
+  ( PShow a
+  , PShow b
+  ) =>
+  Show (PFun a b)
+  where
+  show = showPFun
 
 showPFun ::
-    forall (a :: S -> Type) (b :: S -> Type).
-    ( PShow a
-    , PShow b
-    ) =>
-    PFun a b ->
-    String
+  forall (a :: S -> Type) (b :: S -> Type).
+  ( PShow a
+  , PShow b
+  ) =>
+  PFun a b ->
+  String
 showPFun (PFun t d _) =
-    "{\n"
-        ++ intercalate
-            ", \n"
-            ( [ show x ++ " -> " ++ show c
-              | (x, c) <- t
-              ]
-                ++ ["_ -> " ++ show d]
-            )
-        ++ "\n}"
+  "{\n"
+    ++ intercalate
+      ", \n"
+      ( [ show x ++ " -> " ++ show c
+        | (x, c) <- t
+        ]
+          ++ ["_ -> " ++ show d]
+      )
+    ++ "\n}"
 
 -- Puts Haskell list of paris into Soctt Pluts
 -- It uses Scott Plut to support not only `PLift` types but also
 -- any other Pluts. Using `PBuilinList` wouldn't allow anything but
 -- `PLift`s.
 conTable ::
-    forall (a :: S -> Type) (b :: S -> Type).
-    [(TestableTerm a, TestableTerm b)] ->
-    TestableTerm (PList (PPair a b))
+  forall (a :: S -> Type) (b :: S -> Type).
+  [(TestableTerm a, TestableTerm b)] ->
+  TestableTerm (PList (PPair a b))
 conTable = foldr go (TestableTerm pnil)
   where
     go :: (TestableTerm a, TestableTerm b) -> TestableTerm (PList (PPair a b)) -> TestableTerm (PList (PPair a b))
     go (TestableTerm x, TestableTerm y) (TestableTerm ps) = TestableTerm $ pcons # pcon (PPair x y) # ps
 
 plamTable ::
-    forall (a :: S -> Type) (b :: S -> Type) (s :: S).
-    PEq a =>
-    [(TestableTerm a, TestableTerm b)] ->
-    TestableTerm b ->
-    Term s (a :--> b)
+  forall (a :: S -> Type) (b :: S -> Type) (s :: S).
+  PEq a =>
+  [(TestableTerm a, TestableTerm b)] ->
+  TestableTerm b ->
+  Term s (a :--> b)
 plamTable (conTable -> TestableTerm t) (TestableTerm d) =
-    plam $ \x -> pmaybe # d # (plookup # x # t)
+  plam $ \x -> pmaybe # d # (plookup # x # t)
 
 plamFinite ::
-    forall (a :: S -> Type) (b :: S -> Type) (s :: S).
-    ( Finite (PLifted a)
-    , PLift a
-    , PLift b
-    , PEq a
-    ) =>
-    (PLifted a -> PLifted b) ->
-    Term s (a :--> b)
+  forall (a :: S -> Type) (b :: S -> Type) (s :: S).
+  ( Finite (PLifted a)
+  , PLift a
+  , PLift b
+  , PEq a
+  ) =>
+  (PLifted a -> PLifted b) ->
+  Term s (a :--> b)
 plamFinite f = plam $ \x -> pfromJust #$ plookup # x # table
   where
     table' = (pconstantT &&& (pconstantT . f)) <$> universeF
     table = unTestableTerm $ conTable table'
 
 plookup ::
-    forall (a :: S -> Type) (b :: S -> Type) (s :: S) list.
-    (PEq a, PIsListLike list (PPair a b)) =>
-    Term s (a :--> list (PPair a b) :--> PMaybe b)
+  forall (a :: S -> Type) (b :: S -> Type) (s :: S) list.
+  (PEq a, PIsListLike list (PPair a b)) =>
+  Term s (a :--> list (PPair a b) :--> PMaybe b)
 plookup =
-    phoistAcyclic $
-        plam $ \k xs ->
-            pmatch (pfind # plam (\p -> pfstPair # p #== k) # xs) $ \case
-                PNothing -> pcon PNothing
-                PJust p -> pcon (PJust (psndPair # p))
+  phoistAcyclic $
+    plam $ \k xs ->
+      pmatch (pfind # plam (\p -> pfstPair # p #== k) # xs) $ \case
+        PNothing -> pcon PNothing
+        PJust p -> pcon (PJust (psndPair # p))
 
 pfstPair ::
-    forall (a :: S -> Type) (b :: S -> Type) (s :: S).
-    Term s (PPair a b :--> a)
+  forall (a :: S -> Type) (b :: S -> Type) (s :: S).
+  Term s (PPair a b :--> a)
 pfstPair = phoistAcyclic $ plam $ flip pmatch $ \(PPair x _) -> x
 
 psndPair ::
-    forall (a :: S -> Type) (b :: S -> Type) (s :: S).
-    Term s (PPair a b :--> b)
+  forall (a :: S -> Type) (b :: S -> Type) (s :: S).
+  Term s (PPair a b :--> b)
 psndPair = phoistAcyclic $ plam $ flip pmatch $ \(PPair _ x) -> x

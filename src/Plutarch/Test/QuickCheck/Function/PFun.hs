@@ -65,7 +65,15 @@ data PFun (a :: S -> Type) (b :: S -> Type) where
     PFun a b
 
 instance PFunction PFun where
-    applyPFun (PFun _ _ f) = f
+  type PFunctionConstraint PFun a b =
+    ( PArbitrary a
+    , PArbitrary b
+    , PCoArbitrary a
+    , PEq a
+    , PShow a
+    , PShow b
+    )
+  applyPFun (PFun _ _ f) = f
 
 mkPFun ::
   forall (a :: S -> Type) (b :: S -> Type).

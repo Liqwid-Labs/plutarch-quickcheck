@@ -28,13 +28,6 @@ import Plutarch.Test.QuickCheck.Function.PFun (PFun(..), pfunTable, pfunFinite)
 import Plutarch.Test.QuickCheck.Function.PFunLift (PFunLift(..), pfunLiftTable, pfunLiftFinite)
 
 import Plutarch.Prelude (S, Type, Term, (:-->))
-import Plutarch.Show (PShow)
-
-import Plutarch.Prelude (PEq)
-import Plutarch.Test.QuickCheck.Instances (
-  PArbitrary (..),
-  PCoArbitrary (..),
- )
 import Test.QuickCheck (
   Gen,
   Arbitrary (arbitrary, shrink),
@@ -48,13 +41,7 @@ instance PFunction WrapPFun where
 
 instance
   forall (a :: S -> Type) (b :: S -> Type).
-  ( PArbitrary a
-  , PArbitrary b
-  , PCoArbitrary a
-  , PShow a
-  , PShow b
-  , PEq a
-  ) =>
+  PFunctionConstraint PFun a b =>
   Arbitrary (WrapPFun a b)
   where
   arbitrary = WrapPFun <$> (arbitrary :: Gen (PFun a b))

@@ -13,7 +13,7 @@ module Main (main) where
 
 import GHC.IO.Encoding (setLocaleEncoding, utf8)
 import Plutarch.Prelude (PBool, PBuiltinList, PList, Term, pfilter, plam, pmap, (#), (#$), (#==), (:-->))
-import Plutarch.Test.QuickCheck (PA, fromPFun)
+import Plutarch.Test.QuickCheck (PA, fromPFun, lifty)
 import Test.Tasty (adjustOption, defaultMain, testGroup)
 import Test.Tasty.ExpectedFailure (expectFail)
 import Test.Tasty.QuickCheck (Property, QuickCheckTests, arbitrary, forAllShrink, resize, shrink, testProperty)
@@ -33,8 +33,9 @@ mapzipProp = forAllShrink arbitrary shrink $ fromPFun test
       pfilter # f # (pmap # g # x) #== pmap # g # (pfilter # f # x)
 
 composeProp :: Property
-composeProp = forAllShrink arbitrary shrink $ \x ->
-  forAllShrink arbitrary shrink $ \y ->
+composeProp =
+  forAllShrink lifty shrink $ \x ->
+  forAllShrink lifty shrink $ \y ->
     forAllShrink (resize 20 arbitrary) shrink $ \z ->
       (fromPFun test) x y z
   where

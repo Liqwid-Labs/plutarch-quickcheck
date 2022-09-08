@@ -112,6 +112,9 @@ library
   other-modules:
     Plutarch.Extra.Maybe
     Plutarch.Test.QuickCheck.Function
+    Plutarch.Test.QuickCheck.Function.Internal
+    Plutarch.Test.QuickCheck.Function.PFun
+    Plutarch.Test.QuickCheck.Function.PFunLift    
     Plutarch.Test.QuickCheck.Helpers
     Plutarch.Test.QuickCheck.Instances
 

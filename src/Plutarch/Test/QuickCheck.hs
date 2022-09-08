@@ -12,6 +12,7 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 module Plutarch.Test.QuickCheck (
+  lifty,
   type PLamArgs,
   type PA,
   type PB,
@@ -24,6 +25,7 @@ module Plutarch.Test.QuickCheck (
   shrinkPLift,
   arbitraryPLift,
   PFun (..),
+  PFunLift (..),
   pattern PFn,
   TestableTerm (..),
   PArbitrary (..),
@@ -68,7 +70,10 @@ import Plutarch.Prelude (
  )
 import Plutarch.Show (PShow)
 import Plutarch.Test.QuickCheck.Function (
+  lifty,
   PFun (..),
+  PFunLift (..),
+  WrapPFun(..),
   pattern PFn,
  )
 import Plutarch.Test.QuickCheck.Helpers (loudEval)
@@ -95,7 +100,7 @@ import Test.QuickCheck.Poly (A (A), B (B), C (C))
 -- :k! PLamWrapped (TestableTerm PInteger -> TestableTerm (PInteger :--> PBool) -> TestableTerm PUnit)
 -- = TestableTerm PInteger -> PFun PInteger PBool -> TestableTerm PUnit
 type family PLamWrapped (h :: Type) :: Type where
-  PLamWrapped (TestableTerm (a :--> b) -> c) = PFun a b -> PLamWrapped c
+  PLamWrapped (TestableTerm (a :--> b) -> c) = WrapPFun a b -> PLamWrapped c
   PLamWrapped (a -> b) = a -> PLamWrapped b
   PLamWrapped a = a
 
@@ -131,9 +136,7 @@ instance
   forall (a :: Type) (b :: Type) (pa :: S -> Type) (pb :: S -> Type).
   ( TestableTerm (pa :--> pb) ~ a
   , PWrapLam' b (IsLam b) (IsLast b)
-  , PLamWrapped (a -> b) ~ (PFun pa pb -> PLamWrapped b)
-  , PLift pa
-  , PLift pb
+  , PLamWrapped (a -> b) ~ (WrapPFun pa pb -> PLamWrapped b)
   ) =>
   PWrapLam' (a -> b) 'True 'False
   where

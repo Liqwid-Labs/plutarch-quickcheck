@@ -33,9 +33,29 @@ verified by the equivalent Haskell definition. Currently, only functions with
 a single arguement are supported.
 
 ```hs
-pfunctionGeneration :: Term s (PFun PInteger PInteger :--> PBool)
-pfunctionGeneration = plam $ \(PFn (f :: Term s (PInteger :--> PInteger))) -> ...
+composeProp :: 
+    Term s ((PInteger :--> PInteger) :--> 
+            (PInteger :--> PInteger) :--> 
+             PList PInteger :--> 
+             PBool)
+composeProp = plam $ \f g x -> 
+    pfilter # f # (pmap # g # x) #== pmap # g # (pfilter # f # x)
+		
+quickCheck $ fromPFun composeProp -- Magic!
+{-
+*** Failed! Falsified (after 3 tests and 5 shrinks):
+{
+PA 2 -> PFalse, 
+_ -> PTrue
+}
+{
+_ -> PA 0
+}
+[PA 2]
+-}
+```
 
+```hs
 reverseProperty :: Property
 reverseProperty = haskEquiv' reverse (preverse @PBuiltinList)
 ```

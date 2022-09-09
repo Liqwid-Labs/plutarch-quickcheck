@@ -2,6 +2,14 @@
 
 This format is based on [Keep A Changelog](https://keepachangelog.com/en/1.0.0).
 
+## 2.2.0 -- 2022-09-08
+
+### Added
+
+* `WrapPFun` is an abstraction of Plutarch function generator. It is used to 
+  support both restrictive but fast `lifty` and slower but more general `unlifty` 
+  generators.
+
 ## 2.1.1 -- 2022-09-06
 
 ### Changed

@@ -12,8 +12,6 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 module Plutarch.Test.QuickCheck (
-  lifty,
-  type PLamArgs,
   type PA,
   type PB,
   type PC,
@@ -24,11 +22,10 @@ module Plutarch.Test.QuickCheck (
   haskEquiv,
   shrinkPLift,
   arbitraryPLift,
-  PFun (..),
-  PFunLift (..),
-  pattern PFn,
+  WrapPFun (..),
   TestableTerm (..),
   PArbitrary (..),
+  PCoArbitrary (..),
   pconstantT,
   pliftT,
   uplcEq,
@@ -70,10 +67,7 @@ import Plutarch.Prelude (
  )
 import Plutarch.Show (PShow)
 import Plutarch.Test.QuickCheck.Function (
-  lifty,
-  PFun (..),
-  PFunLift (..),
-  WrapPFun(..),
+  WrapPFun (..),
   pattern PFn,
  )
 import Plutarch.Test.QuickCheck.Helpers (loudEval)
@@ -305,10 +299,7 @@ data Partiality
   = ByComplete
   | ByPartial
 
-{- | Extracts all @TestableTerm@s from give Plutarch function.
-
- @since 2.0.0
--}
+-- Extracts all @TestableTerm@s from give Plutarch function.
 type family PLamArgs (p :: S -> Type) :: [Type] where
   PLamArgs (a :--> b) = TestableTerm a : PLamArgs b
   PLamArgs _ = '[]
@@ -459,8 +450,8 @@ uplcEq x y = either failWith property go
             (Right s, _, _) -> Right s
             (Left err, _, _) -> Left $ "Term evaluation failed:\n" <> show err
 
-{- | Placeholder for a polymorphic type. Plutarch equivalence of QuickCheck's
-  `A`.
+{- | Placeholder for a polymorphic type. Plutarch equivalence of
+     QuickCheck's `A`.
 
  @since 2.0.0
 -}

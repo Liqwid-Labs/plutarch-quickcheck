@@ -45,8 +45,15 @@ import Test.QuickCheck (
   vectorOf,
  )
 
-import Plutarch.Test.QuickCheck.Function.Internal (PFunction(..))    
+import Plutarch.Test.QuickCheck.Function.Internal (PFunction (..))
 
+{- | Same as 'PFun', but uses Data-encoded `PBuiltinList`. With its
+     stricter constraint, it has faster performance over 'PFun'. It
+     will only allow types that can be `PLifted`. If one needs to
+     generate anything not `PLift` type, they should use `PFun`.
+
+ @since 2.2.0
+-}
 data PFunLift (a :: S -> Type) (b :: S -> Type) where
   PFunLift ::
     (PLift a, PLift b) =>
@@ -56,7 +63,8 @@ data PFunLift (a :: S -> Type) (b :: S -> Type) where
     PFunLift a b
 
 instance PFunction PFunLift where
-    type PFunctionConstraint PFunLift a b =
+  type
+    PFunctionConstraint PFunLift a b =
       ( PLift a
       , PLift b
       , Arbitrary (PLifted a)
@@ -67,8 +75,8 @@ instance PFunction PFunLift where
       , Show (PLifted a)
       , Show (PLifted b)
       )
-    applyPFun (PFunLift _ _ f) = f
-    
+  applyPFun (PFunLift _ _ f) = f
+
 mkPFunLift ::
   forall (a :: S -> Type) (b :: S -> Type).
   ( PLift a

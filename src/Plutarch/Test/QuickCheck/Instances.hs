@@ -106,13 +106,11 @@ import Plutarch.Test.QuickCheck.Helpers (loudEval)
 import Test.QuickCheck (
   Arbitrary (arbitrary, shrink),
   CoArbitrary (coarbitrary),
-  Function (function),
   Gen,
   Testable (property),
   chooseInt,
   elements,
   frequency,
-  functionMap,
   sized,
   variant,
   vectorOf,
@@ -219,9 +217,6 @@ instance (PArbitrary p, PIsData p) => PArbitrary (PAsData p) where
 
 instance (PCoArbitrary p, PIsData p) => PCoArbitrary (PAsData p) where
   pcoarbitrary (pfromDataT -> x) = pcoarbitrary x
-
-instance Function (TestableTerm PInteger) where
-  function = functionMap pliftT pconstantT
 
 -- | @since 2.0.0
 instance PArbitrary PInteger where

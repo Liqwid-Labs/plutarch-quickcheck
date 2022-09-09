@@ -13,7 +13,8 @@ module Main (main) where
 
 import GHC.IO.Encoding (setLocaleEncoding, utf8)
 import Plutarch.Prelude (PBool, PBuiltinList, PList, Term, pfilter, plam, pmap, (#), (#$), (#==), (:-->))
-import Plutarch.Test.QuickCheck (PA, fromPFun, lifty)
+import Plutarch.Test.QuickCheck (PA, fromPFun)
+import Plutarch.Test.QuickCheck.Function (lifty, unlifty)
 import Test.Tasty (adjustOption, defaultMain, testGroup)
 import Test.Tasty.ExpectedFailure (expectFail)
 import Test.Tasty.QuickCheck (Property, QuickCheckTests, arbitrary, forAllShrink, resize, shrink, testProperty)
@@ -32,12 +33,30 @@ mapzipProp = forAllShrink arbitrary shrink $ fromPFun test
     test = plam $ \f g x ->
       pfilter # f # (pmap # g # x) #== pmap # g # (pfilter # f # x)
 
-composeProp :: Property
-composeProp =
+composeUnliftyProp :: Property
+composeUnliftyProp =
+  forAllShrink unlifty shrink $ \x ->
+    forAllShrink unlifty shrink $ \y ->
+      forAllShrink (resize 20 arbitrary) shrink $ \z ->
+        (fromPFun test) x y z
+  where
+    test ::
+      Term
+        s
+        ( (PA :--> PA)
+            :--> (PA :--> PA)
+            :--> PList PA
+            :--> PBool
+        )
+    test = plam $ \f g x ->
+      (pmap # g #$ pmap # f # x) #== (pmap # plam (\y -> g #$ f # y) # x)
+
+composeLiftyProp :: Property
+composeLiftyProp =
   forAllShrink lifty shrink $ \x ->
-  forAllShrink lifty shrink $ \y ->
-    forAllShrink (resize 20 arbitrary) shrink $ \z ->
-      (fromPFun test) x y z
+    forAllShrink lifty shrink $ \y ->
+      forAllShrink (resize 20 arbitrary) shrink $ \z ->
+        (fromPFun test) x y z
   where
     test ::
       Term
@@ -58,7 +77,8 @@ main = do
     testGroup
       ""
       [ expectFail $ testProperty "map zip is equal to zip map" mapzipProp
-      , testProperty "composition should be eqaul to separate applications" composeProp
+      , testProperty "composition should be eqaul to separate applications - lifty generation" composeLiftyProp
+      , testProperty "composition should be eqaul to separate applications - unlifty generation" composeUnliftyProp
       ]
   where
     -- 100 tests is way too small for a property test to search for a counterexample,

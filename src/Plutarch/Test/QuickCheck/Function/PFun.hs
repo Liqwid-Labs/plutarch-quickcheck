@@ -55,8 +55,15 @@ import Test.QuickCheck (
   vectorOf,
  )
 
-import Plutarch.Test.QuickCheck.Function.Internal (PFunction(..))
+import Plutarch.Test.QuickCheck.Function.Internal (PFunction (..))
 
+{- | Unlifty, arbitrary Plutarch function. Internally, it uses limited
+     pairs of inputs and outputs with a fall-back value to represent a
+     pseudo set theoretical definition of function. Internally, these
+     pairs are represented with the Scott-encoded `PList`.
+
+ @since 2.2.0
+-}
 data PFun (a :: S -> Type) (b :: S -> Type) where
   PFun ::
     [(TestableTerm a, TestableTerm b)] ->
@@ -65,14 +72,15 @@ data PFun (a :: S -> Type) (b :: S -> Type) where
     PFun a b
 
 instance PFunction PFun where
-  type PFunctionConstraint PFun a b =
-    ( PArbitrary a
-    , PArbitrary b
-    , PCoArbitrary a
-    , PEq a
-    , PShow a
-    , PShow b
-    )
+  type
+    PFunctionConstraint PFun a b =
+      ( PArbitrary a
+      , PArbitrary b
+      , PCoArbitrary a
+      , PEq a
+      , PShow a
+      , PShow b
+      )
   applyPFun (PFun _ _ f) = f
 
 mkPFun ::

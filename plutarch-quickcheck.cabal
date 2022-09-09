@@ -108,13 +108,15 @@ common common-tests
 
 library
   import:          common-lang
-  exposed-modules: Plutarch.Test.QuickCheck
+  exposed-modules:
+    Plutarch.Test.QuickCheck
+    Plutarch.Test.QuickCheck.Function
+
   other-modules:
     Plutarch.Extra.Maybe
-    Plutarch.Test.QuickCheck.Function
     Plutarch.Test.QuickCheck.Function.Internal
     Plutarch.Test.QuickCheck.Function.PFun
-    Plutarch.Test.QuickCheck.Function.PFunLift    
+    Plutarch.Test.QuickCheck.Function.PFunLift
     Plutarch.Test.QuickCheck.Helpers
     Plutarch.Test.QuickCheck.Instances
 

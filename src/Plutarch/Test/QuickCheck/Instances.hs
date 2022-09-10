@@ -17,6 +17,7 @@ module Plutarch.Test.QuickCheck.Instances (
 ) where
 
 import Data.ByteString (ByteString)
+import GHC.TypeLits (Symbol)
 import qualified Data.Text as T (intercalate, pack, unpack)
 import qualified GHC.Exts as Exts (IsList (fromList, toList))
 import Plutarch (
@@ -45,6 +46,8 @@ import Plutarch.Api.V1 (
   PValidatorHash (PValidatorHash),
   PValue (PValue),
  )
+import Data.Proxy (Proxy(Proxy))
+import Plutarch.DataRepr.Internal (PUnLabel, PLabeledType((:=)), pdropDataRecord)  
 import Plutarch.Api.V1.Time (PPOSIXTime (PPOSIXTime))
 import Plutarch.Api.V1.Tuple (
   PTuple,
@@ -70,6 +73,7 @@ import Plutarch.Lift (PUnsafeLiftDecl (PLifted), plift)
 import Plutarch.Maybe (pfromJust)
 import Plutarch.Positive (PPositive, ptryPositive)
 import Plutarch.Prelude (
+  PDataRecord,
   PAsData,
   PBool,
   PBuiltinList,
@@ -211,6 +215,35 @@ instance PArbitrary p => Arbitrary (TestableTerm p) where
 
 instance PCoArbitrary p => CoArbitrary (TestableTerm p) where
   coarbitrary = pcoarbitrary
+
+-- | @since 2.2.0
+instance
+  forall (a :: PLabeledType) (as :: [PLabeledType]) (label :: Symbol) (ap :: S -> Type).
+  ( PArbitrary (PUnLabel a)
+  , PArbitrary (PDataRecord as)
+  , PIsData (PUnLabel a)
+  , label ':= ap ~ a
+  ) =>
+  PArbitrary (PDataRecord (a ': as))
+  where
+  parbitrary = do
+    (TestableTerm x) <- parbitrary
+    (TestableTerm xs) <- parbitrary
+    return $ TestableTerm $ pdcons # pdata x # xs
+  pshrink xs =
+    [ TestableTerm $ pdcons # x' # xs'
+    | (TestableTerm x') <- shrink (pdhead xs)
+    , (TestableTerm xs') <- idIfEmpty (pdtail xs)
+    ]
+    where
+      idIfEmpty x = let xs = shrink x in if null xs then [x] else xs
+      pdhead (TestableTerm pd) = TestableTerm $ pfield @label # pd
+      pdtail (TestableTerm pd) = TestableTerm $ pdropDataRecord (Proxy @1) pd
+
+-- | @since 2.2.0
+instance PArbitrary (PDataRecord '[]) where
+  parbitrary = return $ TestableTerm pdnil
+  pshrink = const []
 
 -- | @since 2.0.0
 instance (PArbitrary p, PIsData p) => PArbitrary (PAsData p) where

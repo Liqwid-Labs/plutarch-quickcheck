@@ -18,6 +18,7 @@ module Plutarch.Test.QuickCheck.Instances (
 
 import Data.ByteString (ByteString)
 import GHC.TypeLits (Symbol)
+import qualified Data.Functor.Compose as F
 import qualified Data.Text as T (intercalate, pack, unpack)
 import qualified GHC.Exts as Exts (IsList (fromList, toList))
 import Plutarch (
@@ -33,6 +34,7 @@ import Plutarch (
   (#),
   (#$),
  )
+import qualified Generics.SOP as SOP
 import Plutarch.Api.V1 (
   PCredential (PPubKeyCredential, PScriptCredential),
   PCurrencySymbol (PCurrencySymbol),
@@ -47,12 +49,11 @@ import Plutarch.Api.V1 (
   PValue (PValue),
  )
 import Data.Proxy (Proxy(Proxy))
-import Plutarch.DataRepr.Internal (PUnLabel, PLabeledType((:=)), pdropDataRecord)  
+import Plutarch.DataRepr.Internal (PUnLabel, PLabeledType((:=)), pdropDataRecord, PDataRecord, PDataSum(PDataSum))  
 import Plutarch.Api.V1.Time (PPOSIXTime (PPOSIXTime))
 import Plutarch.Api.V1.Tuple (
   PTuple,
   pbuiltinPairFromTuple,
-  ptuple,
   ptupleFromBuiltin,
  )
 import Plutarch.Api.V2 (
@@ -73,7 +74,6 @@ import Plutarch.Lift (PUnsafeLiftDecl (PLifted), plift)
 import Plutarch.Maybe (pfromJust)
 import Plutarch.Positive (PPositive, ptryPositive)
 import Plutarch.Prelude (
-  PDataRecord,
   PAsData,
   PBool,
   PBuiltinList,
@@ -179,7 +179,7 @@ instance PShow a => Show (TestableTerm a) where
      = Note
 
      The default implementation for 'pshrink' does no shrinking. If at all
-     possible, please define a shrinker, as this will make your test results
+     possible, please define a shrinker, as this will conDataSum your test results
      much more useful.
 
  @since 2.0.0
@@ -244,6 +244,87 @@ instance
 instance PArbitrary (PDataRecord '[]) where
   parbitrary = return $ TestableTerm pdnil
   pshrink = const []
+
+class PGenDataSum (defs :: [[PLabeledType]]) where
+  pgenDataSum :: Gen (SOP.NP (F.Compose TestableTerm PDataRecord) defs)
+
+instance
+  forall (def :: [PLabeledType]) (defs :: [[PLabeledType]]).
+  ( PArbitrary (PDataRecord def)
+  , PGenDataSum defs
+  ) =>
+  PGenDataSum (def ': defs)
+  where
+  pgenDataSum = do
+    x <- (parbitrary :: Gen (TestableTerm (PDataRecord def)))
+    xs <- (pgenDataSum :: Gen (SOP.NP (F.Compose TestableTerm PDataRecord) defs))
+    return $ (F.Compose x) SOP.:* xs
+
+instance PGenDataSum '[] where
+  pgenDataSum = return $ SOP.Nil
+
+chooseNP ::
+  forall (a :: [PLabeledType] -> Type) (defs :: [[PLabeledType]]).
+  SOP.NP a defs ->
+  Gen (SOP.NS a defs)
+chooseNP xs = do
+  idx <- chooseInt (0, lengthNP xs - 1)
+  return $ convert idx xs
+  where
+    lengthNP :: SOP.NP a xs -> Int
+    lengthNP SOP.Nil = 0
+    lengthNP (_ SOP.:* xs) = lengthNP xs + 1
+
+    convert :: Int -> SOP.NP a xs -> SOP.NS a xs
+    convert 0 (y SOP.:* _) = SOP.Z y
+    convert i (_ SOP.:* ys) = SOP.S $ convert (i - 1) ys
+    convert _ SOP.Nil = error "attempts to choose index larger than length"
+
+testableDataSumS ::
+  forall (def :: [[PLabeledType]]) (xs :: [PLabeledType]).
+  (SOP.SListI def) =>
+  TestableTerm (PDataSum def) -> TestableTerm (PDataSum (xs ': def))
+testableDataSumS (TestableTerm x) =
+  TestableTerm $ pmatch x $ \(PDataSum x') -> pcon $ PDataSum $ SOP.S x'
+
+conDataSum ::
+  forall (def :: [[PLabeledType]]).
+  (SOP.SListI def) =>
+  SOP.NS (F.Compose TestableTerm PDataRecord) def ->
+  TestableTerm (PDataSum def)
+conDataSum (SOP.Z (F.Compose (TestableTerm x))) = TestableTerm $ pcon $ PDataSum $ SOP.Z $ F.Compose x
+conDataSum (SOP.S x) = testableDataSumS $ conDataSum x
+
+-- unconDataSum ::
+--   forall (def :: [[PLabeledType]]).
+--   (SOP.SListI def) =>
+--   TestableTerm (PDataSum def) ->
+--   SOP.NS (F.Compose TestableTerm PDataRecord) def  
+-- unconDataSum xs
+--   | plift $ isZ xs = undefined
+--   | otherwise = 
+--   where
+--     getZ :: TestableTerm (PDataSum def) -> Term s PBool
+--     isZ :: TestableTerm (PDataSum def) -> Term s PBool
+--     isZ (TestableTerm x) =
+--       pmatch x $ \case 
+--                      PDataSum (SOP.Z _) -> pconstant True
+--                      PDataSum (SOP.S _) -> pconstant False
+              
+
+-- | @since 2.2.0
+instance
+  forall (defs :: [[PLabeledType]]).
+  ( SOP.SListI defs
+  , PGenDataSum defs
+  ) =>
+  PArbitrary (PDataSum defs)
+  where
+  parbitrary = do
+    prod <- (pgenDataSum :: Gen (SOP.NP (F.Compose TestableTerm PDataRecord) defs))
+    ns <- chooseNP prod
+    return $ conDataSum ns
+  pshrink = undefined
 
 -- | @since 2.0.0
 instance (PArbitrary p, PIsData p) => PArbitrary (PAsData p) where
@@ -449,16 +530,16 @@ instance
       toTuple = liftT (pfromData . ptupleFromBuiltin . pdata)
       fromTuple = liftT (pfromData . pbuiltinPairFromTuple . pdata)
 
-instance
-  {-# OVERLAPPING #-}
-  ( PCoArbitrary a
-  , PCoArbitrary b
-  , PIsData a
-  , PIsData b
-  ) =>
-  PCoArbitrary (PBuiltinPair (PAsData a) (PAsData b))
-  where
-  pcoarbitrary (liftT ptupleFromBuiltin . pdataT -> t) = pcoarbitrary t
+-- instance
+--   {-# OVERLAPPING #-}
+--   ( PCoArbitrary a
+--   , PCoArbitrary b
+--   , PIsData a
+--   , PIsData b
+--   ) =>
+--   PCoArbitrary (PBuiltinPair (PAsData a) (PAsData b))
+--   where
+--   pcoarbitrary (liftT ptupleFromBuiltin . pdataT -> t) = pcoarbitrary t
 
 -- | @since 2.0.0
 instance
@@ -482,25 +563,25 @@ instance (PCoArbitrary a, PCoArbitrary b) => PCoArbitrary (PPair a b) where
   pcoarbitrary x = pcoarbitrary (ppFstT x) . pcoarbitrary (ppSndT x)
 
 -- | @since 2.0.0
-instance
-  forall (a :: S -> Type) (b :: S -> Type).
-  ( PArbitrary a
-  , PArbitrary b
-  , PIsData a
-  , PIsData b
-  ) =>
-  PArbitrary (PTuple a b)
-  where
-  parbitrary = do
-    (TestableTerm x) <- parbitrary
-    (TestableTerm y) <- parbitrary
-    return $ TestableTerm $ ptuple # pdata x # pdata y
+-- instance
+--   forall (a :: S -> Type) (b :: S -> Type).
+--   ( PArbitrary a
+--   , PArbitrary b
+--   , PIsData a
+--   , PIsData b
+--   ) =>
+--   PArbitrary (PTuple a b)
+--   where
+--   parbitrary = do
+--     (TestableTerm x) <- parbitrary
+--     (TestableTerm y) <- parbitrary
+--     return $ TestableTerm $ ptuple # pdata x # pdata y
 
-  pshrink x =
-    [ TestableTerm $ ptuple # a # b
-    | (TestableTerm a) <- shrink $ ptFstT x
-    , (TestableTerm b) <- shrink $ ptSndT x
-    ]
+--   pshrink x =
+--     [ TestableTerm $ ptuple # a # b
+--     | (TestableTerm a) <- shrink $ ptFstT x
+--     , (TestableTerm b) <- shrink $ ptSndT x
+--     ]
 
 instance
   forall (a :: S -> Type) (b :: S -> Type).
@@ -561,14 +642,14 @@ instance
       unMap = flip pmatchT $ \(PMap a) -> a
 
 -- | @since 2.0.0
-instance
-  forall (a :: S -> Type) (b :: S -> Type) (c :: KeyGuarantees).
-  (PCoArbitrary a, PCoArbitrary b, PIsData a, PIsData b) =>
-  PCoArbitrary (PMap c a b)
-  where
-  pcoarbitrary = pcoarbitrary . unMap
-    where
-      unMap = flip pmatchT $ \(PMap a) -> a
+-- instance
+--   forall (a :: S -> Type) (b :: S -> Type) (c :: KeyGuarantees).
+--   (PCoArbitrary a, PCoArbitrary b, PIsData a, PIsData b) =>
+--   PCoArbitrary (PMap c a b)
+--   where
+--   pcoarbitrary = pcoarbitrary . unMap
+--     where
+--       unMap = flip pmatchT $ \(PMap a) -> a
 
 -- | @since 2.0.0
 instance PArbitrary PPOSIXTime where

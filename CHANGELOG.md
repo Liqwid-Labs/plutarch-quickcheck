@@ -2,6 +2,12 @@
 
 This format is based on [Keep A Changelog](https://keepachangelog.com/en/1.0.0).
 
+## 2.1.1 -- 2022-09-11
+
+### Added
+
+* `PArbitrary` instances for `PDataRecord` and `PDataSum`.
+
 ## 2.1.0 -- 2022-09-01
 
 ### Added

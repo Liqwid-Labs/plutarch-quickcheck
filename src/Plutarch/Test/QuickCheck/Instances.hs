@@ -245,7 +245,7 @@ instance
     return $ TestableTerm $ pdcons # pdata x # xs
   pshrink xs =
     [ TestableTerm $ pdcons # x' # xs'
-    | (TestableTerm x') <- shrink (pdhead xs)
+    | (TestableTerm x') <- idIfEmpty (pdhead xs)
     , (TestableTerm xs') <- idIfEmpty (pdtail xs)
     ]
     where
@@ -321,10 +321,8 @@ pshrinkDataSum xs
       in TestableTerm $ punsafeCoerce $ pconstrBuiltin # (pfstBuiltin # p - 1) # pto (psndBuiltin # p) 
 
     tS :: TestableTerm (PDataSum defs) -> TestableTerm (PDataSum (def ': defs))
-    tS (TestableTerm ns) =
-      let (TestableTerm p) = pundsum $ TestableTerm $ punsafeCoerce ns
-      in TestableTerm $ punsafeCoerce $ pconstrBuiltin # (pfstBuiltin # p + 1) # pto (psndBuiltin # p)  
-    
+    tS (TestableTerm ns) = TestableTerm $ pmatch ns $ \(PDataSum x) -> pcon $ PDataSum $ SOP.S x
+
 -- | @since 2.2.0
 instance 
   forall (def :: [PLabeledType]) (defs :: [[PLabeledType]]).

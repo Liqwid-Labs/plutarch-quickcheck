@@ -22,6 +22,7 @@ module Plutarch.Test.QuickCheck.Instances where
 -- ) where
 
 import Data.Default
+import Debug.Trace
 import Data.ByteString (ByteString)
 import GHC.TypeLits (Symbol)
 import qualified Data.Functor.Compose as F
@@ -29,6 +30,7 @@ import qualified Data.Text as T (intercalate, pack, unpack)
 import qualified GHC.Exts as Exts (IsList (fromList, toList))
 import Plutarch.Unsafe
 import Plutarch.Builtin
+import Plutarch.Internal.Other
 import Plutarch (
   Config (..),
   PlutusType,
@@ -116,6 +118,7 @@ import Plutarch.Prelude (
 import Plutarch.Show (PShow)
 import Plutarch.Test.QuickCheck.Helpers (loudEval)
 import Test.QuickCheck (
+  generate,
   Arbitrary (arbitrary, shrink),
   CoArbitrary (coarbitrary),
   Function (function),
@@ -286,20 +289,31 @@ conDataSum ::
 conDataSum (SOP.Z (F.Compose (TestableTerm x))) = TestableTerm $ pcon $ PDataSum $ SOP.Z $ F.Compose x
 conDataSum (SOP.S x) = testableDataSumS $ conDataSum x
 
--- $> import Generics.SOP
-
--- $> import Plutarch.Prelude
-
 -- $> import Plutarch.Test.QuickCheck.Instances
-
--- $> import Plutarch.Api.V1
-
--- $> import PlutusLedgerApi.V1
 
 -- $> import Test.QuickCheck
 
--- $> generate (arbitrary :: Gen (TestableTerm (PDataSum '[ '["asdf" ':= PInteger, "zxcv" ':= PBool], '["li" ':= PBuiltinList (PAsData PInteger), "hello" ':= PInteger]]))) >>= print . length . shrink
+test = do
+  a <- generate (arbitrary ::
+                    Gen (TestableTerm
+                         (PDataSum '[
+                             '["A" ':= PInteger, "B" ':= PBool],
+                             '["1" ':= PBuiltinList (PAsData PInteger), "2" ':= PInteger],
+                             '["9" ':= PInteger, "8" ':= PInteger],                             
+                             '["z" ':= PBuiltinList (PAsData PInteger), "y" ':= PBool]
+                             ])
+                        ))
+  putStr "Generated: "
+  print a
+  -- print $ printTerm def $ unTestableTerm a
 
+  putStrLn "=======Shrinks======"
+  let s = shrink a 
+  print $ length s
+
+  putStrLn "++++++++++++++++++++++"
+   
+-- $> test
 
 pshrinkDataSum ::
   forall defs def.
@@ -310,26 +324,30 @@ pshrinkDataSum xs
   | isZ xs = shr xs
   | otherwise = tS <$> (shrink $ unTS xs)
   where
-    isZ :: TestableTerm (PDataSum (def ': defs)) -> Bool
-    isZ (TestableTerm ns) = plift $ pmatch ns $ \case
-      PDataSum (SOP.Z _) -> pconstant True
-      PDataSum (SOP.S _) -> pconstant False
-
     pundsum :: TestableTerm (PDataSum '[def]) -> TestableTerm (PBuiltinPair PInteger (PDataRecord def))
     pundsum (TestableTerm t) = TestableTerm $ punsafeCoerce $ (pasConstr #$ pforgetData $ pdata t)
+
+    isZ :: TestableTerm (PDataSum (def ': defs)) -> Bool
+    isZ (TestableTerm ns) =
+      let p = plift $ pfstBuiltin #$ unTestableTerm $ pundsum $ TestableTerm $ punsafeCoerce ns
+      in if p == 0 then True else False
 
     shr :: TestableTerm (PDataSum (def ': defs)) -> [TestableTerm (PDataSum (def ': defs))]
     shr (TestableTerm ns) =
       let (TestableTerm p) = pundsum $ TestableTerm $ punsafeCoerce ns
           go :: TestableTerm PInteger -> TestableTerm (PDataRecord def) -> TestableTerm (PDataSum (def ': defs))
-          go (TestableTerm ix) (TestableTerm d) = TestableTerm $ punsafeCoerce $ pforgetData $ pconstrBuiltin # ix # pto d
+          go (TestableTerm ix) (TestableTerm d) = TestableTerm $ punsafeCoerce $ pconstrBuiltin # ix # pto d
       in (go (TestableTerm $ pfstBuiltin # p)) <$> shrink (TestableTerm $ psndBuiltin # p)
 
     unTS :: TestableTerm (PDataSum (def ': defs)) -> TestableTerm (PDataSum defs)
-    unTS (TestableTerm ns) = TestableTerm $ punsafeCoerce ns
-  
+    unTS (TestableTerm ns) = 
+      let (TestableTerm p) = pundsum $ TestableTerm $ punsafeCoerce ns
+      in TestableTerm $ punsafeCoerce $ pconstrBuiltin # (pfstBuiltin # p - 1) # pto (psndBuiltin # p) 
+
     tS :: TestableTerm (PDataSum defs) -> TestableTerm (PDataSum (def ': defs))
-    tS (TestableTerm ns) =  TestableTerm $ punsafeCoerce ns
+    tS (TestableTerm ns) =
+      let (TestableTerm p) = pundsum $ TestableTerm $ punsafeCoerce ns
+      in TestableTerm $ punsafeCoerce $ pconstrBuiltin # (pfstBuiltin # p + 1) # pto (psndBuiltin # p)  
     
 -- | @since 2.2.0
 instance 

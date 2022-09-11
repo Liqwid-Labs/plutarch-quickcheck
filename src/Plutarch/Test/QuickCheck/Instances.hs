@@ -10,6 +10,8 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ViewPatterns #-}
 
+{-# OPTIONS_GHC -Wno-all #-}
+
 module Plutarch.Test.QuickCheck.Instances where
 
 -- module Plutarch.Test.QuickCheck.Instances (
@@ -20,12 +22,14 @@ module Plutarch.Test.QuickCheck.Instances where
 --   pliftT,
 -- ) where
 
+import Data.Default
 import Data.ByteString (ByteString)
 import GHC.TypeLits (Symbol)
 import qualified Data.Functor.Compose as F
 import qualified Data.Text as T (intercalate, pack, unpack)
 import qualified GHC.Exts as Exts (IsList (fromList, toList))
 import Plutarch.Unsafe
+import Plutarch.Builtin
 import Plutarch (
   Config (..),
   PlutusType,
@@ -35,7 +39,6 @@ import Plutarch (
   compile,
   pcon,
   pmatch,
-  pto,
   (#),
   (#$),
  )
@@ -98,6 +101,7 @@ import Plutarch.Prelude (
   PString,
   PUnit,
   Type,
+  pto,
   pconstant,
   pdata,
   pdcons,
@@ -295,41 +299,8 @@ conDataSum (SOP.S x) = testableDataSumS $ conDataSum x
 
 -- $> import Test.QuickCheck
 
--- $> generate (arbitrary :: Gen (TestableTerm (PDataSum '[ '["hello" ':= PInteger, "world" ':= PBool], '["asdf" ':= PBool], '["x" ':= PInteger, "y" ':= PInteger, "z" ':= PInteger]]))) >>= print . shrink
+-- $> generate (arbitrary :: Gen (TestableTerm (PDataSum '[ '["asdf" ':= PInteger, "zxcv" ':= PBool], '["li" ':= PBuiltinList (PAsData PInteger), "hello" ':= PInteger]]))) >>= print . length . shrink
 
--- $> a = pconstant $ PubKeyCredential $ PubKeyHash "aa"
-
--- $> b = pconstant (Just 10 :: Maybe Integer)
-
--- $> :t unTZ $ TestableTerm $ pto a
-
--- $> shrink $ TestableTerm $ pto b
-
--- $> :k! PInner (PEither PInteger PInteger)
-
--- $> :k! PInner (PMaybeData  PInteger)
-
--- --$> pliftT <$> shrink a
-
--- isZ :: (SOP.SListI defs, PArbitrary (PDataRecord def), PArbitrary (PDataSum defs)) => TestableTerm (PDataSum (def ': defs)) -> Bool
--- isZ (TestableTerm ns) = plift $ pmatch ns $ \case
---   PDataSum (SOP.Z _) -> pconstant True
---   _ -> pconstant False
-  
--- unTZ :: (SOP.SListI defs, PArbitrary (PDataRecord def), PArbitrary (PDataSum defs)) => TestableTerm (PDataSum (def ': defs)) -> TestableTerm (PDataRecord def)
--- unTZ (TestableTerm ns) = TestableTerm $ punDataSum # (punsafeCoerce ns :: Term s (PDataSum '[def]))
-
--- tZ :: (SOP.SListI defs, PArbitrary (PDataRecord def), PArbitrary (PDataSum defs)) => TestableTerm (PDataRecord def) -> TestableTerm (PDataSum (def ': defs))
--- tZ (TestableTerm r) = TestableTerm $ pcon $ PDataSum $ SOP.Z $ F.Compose r
-
--- unTS :: (SOP.SListI defs, PArbitrary (PDataRecord def), PArbitrary (PDataSum defs)) => TestableTerm (PDataSum (def ': defs)) -> TestableTerm (PDataSum defs)
--- unTS (TestableTerm ns) = TestableTerm $ pmatch ns $ \case
---   PDataSum (SOP.S ns') -> pcon $ PDataSum ns'
---   _ -> undefined
-  
--- tS :: (SOP.SListI defs, PArbitrary (PDataRecord def), PArbitrary (PDataSum defs)) => TestableTerm (PDataSum defs) -> TestableTerm (PDataSum (def ': defs))
--- tS (TestableTerm ns) =  TestableTerm $ pmatch ns $ \case
---   PDataSum ns' -> pcon $ PDataSum $ SOP.S $ ns'
 
 pshrinkDataSum ::
   forall defs def.
@@ -337,26 +308,29 @@ pshrinkDataSum ::
   TestableTerm (PDataSum (def ': defs)) ->
   [TestableTerm (PDataSum (def ': defs))]
 pshrinkDataSum xs
-  | isZ xs = tZ <$> (shrink $ unTZ xs)
+  | isZ xs = shr xs
   | otherwise = tS <$> (shrink $ unTS xs)
   where
     isZ :: TestableTerm (PDataSum (def ': defs)) -> Bool
     isZ (TestableTerm ns) = plift $ pmatch ns $ \case
       PDataSum (SOP.Z _) -> pconstant True
       PDataSum (SOP.S _) -> pconstant False
-  
-    unTZ :: TestableTerm (PDataSum (def ': defs)) -> TestableTerm (PDataRecord def)
-    unTZ (TestableTerm ns) = TestableTerm $ punDataSum # (punsafeCoerce ns :: Term s (PDataSum '[def]))
 
-    tZ :: TestableTerm (PDataRecord def) -> TestableTerm (PDataSum (def ': defs))
-    tZ (TestableTerm r) = TestableTerm $ pcon $ PDataSum $ SOP.Z $ F.Compose r
+    pundsum :: TestableTerm (PDataSum '[def]) -> TestableTerm (PBuiltinPair PInteger (PDataRecord def))
+    pundsum (TestableTerm t) = TestableTerm $ punsafeCoerce $ (pasConstr #$ pforgetData $ pdata t)
+
+    shr :: TestableTerm (PDataSum (def ': defs)) -> [TestableTerm (PDataSum (def ': defs))]
+    shr (TestableTerm ns) =
+      let (TestableTerm p) = pundsum $ TestableTerm $ punsafeCoerce ns
+          go :: TestableTerm PInteger -> TestableTerm (PDataRecord def) -> TestableTerm (PDataSum (def ': defs))
+          go (TestableTerm ix) (TestableTerm d) = TestableTerm $ punsafeCoerce $ pforgetData $ pconstrBuiltin # ix # pto d
+      in (go (TestableTerm $ pfstBuiltin # p)) <$> shrink (TestableTerm $ psndBuiltin # p)
 
     unTS :: TestableTerm (PDataSum (def ': defs)) -> TestableTerm (PDataSum defs)
-    unTS (TestableTerm ns) = TestableTerm $ (punsafeCoerce ns :: Term s (PDataSum defs))
+    unTS (TestableTerm ns) = TestableTerm $ punsafeCoerce ns
   
     tS :: TestableTerm (PDataSum defs) -> TestableTerm (PDataSum (def ': defs))
-    tS (TestableTerm ns) =  TestableTerm $ pmatch ns $ \case
-      PDataSum ns' -> pcon $ PDataSum $ SOP.S $ ns'    
+    tS (TestableTerm ns) =  TestableTerm $ punsafeCoerce ns
     
 -- | @since 2.2.0
 instance 

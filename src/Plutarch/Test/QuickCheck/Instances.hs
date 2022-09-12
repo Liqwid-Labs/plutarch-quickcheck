@@ -110,6 +110,7 @@ import Plutarch.Prelude (
   pdcons,
   pdenominator,
   pdnil,
+  perror,
   pfield,
   pfromData,
   pif,
@@ -306,9 +307,10 @@ pshrinkDataSum xs
     pundsum (TestableTerm t) = TestableTerm $ punsafeCoerce $ (pasConstr #$ pforgetData $ pdata t)
 
     isZ :: TestableTerm (PDataSum (def ': defs)) -> Bool
-    isZ (TestableTerm ns) =
-      let p = plift $ pfstBuiltin #$ unTestableTerm $ pundsum $ TestableTerm $ punsafeCoerce ns
-       in if p == 0 then True else False
+    isZ (TestableTerm ns) = plift $
+      pmatch ns $ \case
+        (PDataSum (SOP.Z _)) -> pconstant True
+        (PDataSum (SOP.S _)) -> pconstant False
 
     shr :: TestableTerm (PDataSum (def ': defs)) -> [TestableTerm (PDataSum (def ': defs))]
     shr (TestableTerm ns) =
@@ -319,8 +321,10 @@ pshrinkDataSum xs
 
     unTS :: TestableTerm (PDataSum (def ': defs)) -> TestableTerm (PDataSum defs)
     unTS (TestableTerm ns) =
-      let (TestableTerm p) = pundsum $ TestableTerm $ punsafeCoerce ns
-       in TestableTerm $ punsafeCoerce $ pconstrBuiltin # (pfstBuiltin # p - 1) # pto (psndBuiltin # p)
+      TestableTerm $
+        pmatch ns $ \case
+          (PDataSum (SOP.S x)) -> pcon $ PDataSum x
+          (PDataSum (SOP.Z _)) -> perror
 
     tS :: TestableTerm (PDataSum defs) -> TestableTerm (PDataSum (def ': defs))
     tS (TestableTerm ns) = TestableTerm $ pmatch ns $ \(PDataSum x) -> pcon $ PDataSum $ SOP.S x

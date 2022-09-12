@@ -16,4 +16,4 @@ scriptBudget :: ClosedTerm p -> String
 scriptBudget x =
   case evalTerm (Config {tracingMode = NoTracing}) x of
     Right (_, b, _) -> show b
-    Left err -> error $ show err    
+    Left err -> error $ show err

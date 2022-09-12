@@ -15,19 +15,12 @@ module Plutarch.Test.QuickCheck.Instances (
 ) where
 
 import Data.ByteString (ByteString)
-import GHC.TypeLits (Symbol)
 import qualified Data.Functor.Compose as F
+import Data.Proxy (Proxy (Proxy))
 import qualified Data.Text as T (intercalate, pack, unpack)
 import qualified GHC.Exts as Exts (IsList (fromList, toList))
-import Plutarch.Unsafe (punsafeCoerce)
-import Plutarch.Builtin (
-  pasConstr,
-  pforgetData,
-  pfstBuiltin,
-  psndBuiltin,
-  pconstrBuiltin
- )
-import Plutarch.Internal.Other
+import GHC.TypeLits (Symbol)
+import qualified Generics.SOP as SOP
 import Plutarch (
   Config (Config, tracingMode),
   PlutusType,
@@ -37,10 +30,10 @@ import Plutarch (
   compile,
   pcon,
   pmatch,
+  pto,
   (#),
   (#$),
  )
-import qualified Generics.SOP as SOP
 import Plutarch.Api.V1 (
   PCredential (PPubKeyCredential, PScriptCredential),
   PCurrencySymbol (PCurrencySymbol),
@@ -54,14 +47,6 @@ import Plutarch.Api.V1 (
   PValidatorHash (PValidatorHash),
   PValue (PValue),
  )
-import Data.Proxy (Proxy(Proxy))
-import Plutarch.DataRepr.Internal (
-  PUnLabel,
-  PLabeledType((:=)),
-  pdropDataRecord,
-  PDataRecord,
-  PDataSum(PDataSum),
- )  
 import Plutarch.Api.V1.Time (PPOSIXTime (PPOSIXTime))
 import Plutarch.Api.V1.Tuple (
   PTuple,
@@ -76,6 +61,20 @@ import Plutarch.Api.V2 (
   PPubKeyHash (PPubKeyHash),
   PStakingCredential (PStakingHash, PStakingPtr),
  )
+import Plutarch.Builtin (
+  pasConstr,
+  pconstrBuiltin,
+  pforgetData,
+  pfstBuiltin,
+  psndBuiltin,
+ )
+import Plutarch.DataRepr.Internal (
+  PDataRecord,
+  PDataSum (PDataSum),
+  PLabeledType ((:=)),
+  PUnLabel,
+  pdropDataRecord,
+ )
 import Plutarch.Evaluate (evalScript)
 import Plutarch.Extra.Maybe (
   pfromDJust,
@@ -86,13 +85,13 @@ import Plutarch.Lift (PUnsafeLiftDecl (PLifted), plift)
 import Plutarch.Maybe (pfromJust)
 import Plutarch.Positive (PPositive, ptryPositive)
 import Plutarch.Prelude (
-  PInner,
   PAsData,
   PBool,
   PBuiltinList,
   PBuiltinPair,
   PByteString,
   PEither (PLeft, PRight),
+  PInner,
   PInteger,
   PIsData,
   PIsListLike,
@@ -120,6 +119,7 @@ import Plutarch.Prelude (
  )
 import Plutarch.Show (PShow)
 import Plutarch.Test.QuickCheck.Helpers (loudEval)
+import Plutarch.Unsafe (punsafeCoerce)
 import Test.QuickCheck (
   Arbitrary (arbitrary, shrink),
   CoArbitrary (coarbitrary),
@@ -244,12 +244,13 @@ instance
     (TestableTerm xs) <- parbitrary
     return $ TestableTerm $ pdcons # pdata x # xs
   pshrink xs =
-    [ TestableTerm $ pdcons # x' # xs'
-    | (TestableTerm x') <- idIfEmpty (pdhead xs)
-    , (TestableTerm xs') <- idIfEmpty (pdtail xs)
+    [ TestableTerm $ pdcons # x' # unTestableTerm (pdtail xs)
+    | (TestableTerm x') <- shrink (pdhead xs)
     ]
+      ++ [ TestableTerm $ pdcons # unTestableTerm (pdhead xs) # xs'
+         | (TestableTerm xs') <- shrink (pdtail xs)
+         ]
     where
-      idIfEmpty x = let xs = shrink x in if null xs then [x] else xs
       pdhead (TestableTerm pd) = TestableTerm $ pfield @label # pd
       pdtail (TestableTerm pd) = TestableTerm $ pdropDataRecord (Proxy @1) pd
 
@@ -279,7 +280,8 @@ instance PGenDataSum '[] where
 testableDataSumS ::
   forall (defs :: [[PLabeledType]]) (xs :: [PLabeledType]).
   (SOP.SListI defs) =>
-  TestableTerm (PDataSum defs) -> TestableTerm (PDataSum (xs ': defs))
+  TestableTerm (PDataSum defs) ->
+  TestableTerm (PDataSum (xs ': defs))
 testableDataSumS (TestableTerm x) =
   TestableTerm $ pmatch x $ \(PDataSum x') -> pcon $ PDataSum $ SOP.S x'
 
@@ -306,29 +308,29 @@ pshrinkDataSum xs
     isZ :: TestableTerm (PDataSum (def ': defs)) -> Bool
     isZ (TestableTerm ns) =
       let p = plift $ pfstBuiltin #$ unTestableTerm $ pundsum $ TestableTerm $ punsafeCoerce ns
-      in if p == 0 then True else False
+       in if p == 0 then True else False
 
     shr :: TestableTerm (PDataSum (def ': defs)) -> [TestableTerm (PDataSum (def ': defs))]
     shr (TestableTerm ns) =
       let (TestableTerm p) = pundsum $ TestableTerm $ punsafeCoerce ns
           go :: TestableTerm PInteger -> TestableTerm (PDataRecord def) -> TestableTerm (PDataSum (def ': defs))
           go (TestableTerm ix) (TestableTerm d) = TestableTerm $ punsafeCoerce $ pconstrBuiltin # ix # pto d
-      in (go (TestableTerm $ pfstBuiltin # p)) <$> shrink (TestableTerm $ psndBuiltin # p)
+       in (go (TestableTerm $ pfstBuiltin # p)) <$> shrink (TestableTerm $ psndBuiltin # p)
 
     unTS :: TestableTerm (PDataSum (def ': defs)) -> TestableTerm (PDataSum defs)
-    unTS (TestableTerm ns) = 
+    unTS (TestableTerm ns) =
       let (TestableTerm p) = pundsum $ TestableTerm $ punsafeCoerce ns
-      in TestableTerm $ punsafeCoerce $ pconstrBuiltin # (pfstBuiltin # p - 1) # pto (psndBuiltin # p) 
+       in TestableTerm $ punsafeCoerce $ pconstrBuiltin # (pfstBuiltin # p - 1) # pto (psndBuiltin # p)
 
     tS :: TestableTerm (PDataSum defs) -> TestableTerm (PDataSum (def ': defs))
     tS (TestableTerm ns) = TestableTerm $ pmatch ns $ \(PDataSum x) -> pcon $ PDataSum $ SOP.S x
 
 -- | @since 2.2.0
-instance 
+instance
   forall (def :: [PLabeledType]) (defs :: [[PLabeledType]]).
   ( SOP.SListI defs
   , PArbitrary (PDataRecord def)
-  , PArbitrary (PDataSum defs)  
+  , PArbitrary (PDataSum defs)
   , PGenDataSum defs
   ) =>
   PArbitrary (PDataSum (def ': defs))
@@ -337,9 +339,9 @@ instance
     prod <- (pgenDataSum :: Gen (SOP.NP (F.Compose TestableTerm PDataRecord) (def ': defs)))
     ns <- elements $ SOP.hapInjs prod
     return $ conDataSum ns
-    
+
   pshrink xs = pshrinkDataSum xs
-  
+
 instance PArbitrary (PDataSum '[]) where
   parbitrary = error "attempts to generate an empty PDataSum"
   pshrink = const []
@@ -354,7 +356,7 @@ instance (PCoArbitrary p, PIsData p) => PCoArbitrary (PAsData p) where
 
 -- | @since 2.0.0
 instance PArbitrary PInteger where
-  parbitrary = pconstantT <$> arbitrary  
+  parbitrary = pconstantT <$> arbitrary
   pshrink = fmap pconstantT . shrink . pliftT
 
 instance PCoArbitrary PInteger where
@@ -362,7 +364,7 @@ instance PCoArbitrary PInteger where
 
 -- | @since 2.0.0
 instance PArbitrary PBool where
-  parbitrary = pconstantT <$> arbitrary    
+  parbitrary = pconstantT <$> arbitrary
   pshrink = fmap pconstantT . shrink . pliftT
 
 instance PCoArbitrary PBool where

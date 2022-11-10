@@ -19,6 +19,7 @@ module Plutarch.Test.QuickCheck (
   haskEquiv,
   shrinkPLift,
   arbitraryPLift,
+  loudEval,
   PFun (..),
   pattern PFn,
   TestableTerm (..),

@@ -5,9 +5,6 @@
     nixpkgs.follows = "plutarch/nixpkgs";
     nixpkgs-latest.url = "github:NixOS/nixpkgs";
 
-    nixpkgs-2111 = { url = "github:NixOS/nixpkgs/nixpkgs-21.11-darwin"; };
-    nixpkgs-2205 = { url = "github:NixOS/nixpkgs/22.05"; };
-
     haskell-nix-extra-hackage.follows = "plutarch/haskell-nix-extra-hackage";
     haskell-nix.follows = "plutarch/haskell-nix";
     iohk-nix.follows = "plutarch/iohk-nix";
@@ -24,7 +21,7 @@
     };
 
     liqwid-nix = {
-      url = "github:Liqwid-Labs/liqwid-nix";
+      url = "github:Liqwid-Labs/liqwid-nix?ref=main";
       inputs.nixpkgs-latest.follows = "nixpkgs-latest";
     };
   };

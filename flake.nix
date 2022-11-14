@@ -3,10 +3,7 @@
 
   inputs = {
     nixpkgs.follows = "plutarch/nixpkgs";
-    nixpkgs-latest.url = "github:NixOS/nixpkgs?rev=a0a69be4b5ee63f1b5e75887a406e9194012b492";
-    # temporary fix for nix versions that have the transitive follows bug
-    # see https://github.com/NixOS/nix/issues/6013
-    nixpkgs-2111 = { url = "github:NixOS/nixpkgs/nixpkgs-21.11-darwin"; };
+    nixpkgs-latest.url = "github:NixOS/nixpkgs";
 
     haskell-nix-extra-hackage.follows = "plutarch/haskell-nix-extra-hackage";
     haskell-nix.follows = "plutarch/haskell-nix";
@@ -23,7 +20,7 @@
         "plutarch/haskell-nix/nixpkgs-unstable";
     };
 
-    liqwid-nix.url = "github:Liqwid-Labs/liqwid-nix";
+    liqwid-nix.url = "github:Liqwid-Labs/liqwid-nix?ref=main";
   };
 
   outputs = inputs@{ liqwid-nix, ... }:
@@ -35,9 +32,7 @@
       [
         liqwid-nix.haskellProject
         liqwid-nix.plutarchProject
-        (liqwid-nix.addChecks {
-          plutarch-quickcheck = "plutarch-quickcheck:lib:plutarch-quickcheck";
-        })
+        liqwid-nix.addBuildChecks
         (liqwid-nix.enableFormatCheck [
           "-XTemplateHaskell"
           "-XTypeApplications"

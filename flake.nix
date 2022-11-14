@@ -5,8 +5,6 @@
     nixpkgs.follows = "plutarch/nixpkgs";
     nixpkgs-latest.url = "github:NixOS/nixpkgs";
 
-    # temporary fix for nix versions that have the transitive follows bug
-    # see https://github.com/NixOS/nix/issues/6013
     nixpkgs-2111 = { url = "github:NixOS/nixpkgs/nixpkgs-21.11-darwin"; };
     nixpkgs-2205 = { url = "github:NixOS/nixpkgs/22.05"; };
 
